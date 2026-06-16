@@ -106,20 +106,29 @@ status "Staging directory: ${STAGING_DIR#$BUILD_DIR/}"
 
 # ---- assemble the slug ------------------------------------------------------
 # Copy staged contents into a temp dir, then preserve user-controlled runtime
-# files (Procfile, .profile.d) on top of them, then atomically replace the
-# build dir contents.
+# files AND slug contributions made by earlier buildpacks (heroku/jvm bundles
+# a JDK at .jdk/ and a PATH/JAVA_HOME script at .profile.d/jdk.sh — both must
+# survive the build-dir rewrite or `java` won't be on PATH at runtime).
+# Then atomically replace the build dir contents.
 SLUG_TMP=$(mktemp -d)
 CLEANUP_PATHS+=("$SLUG_TMP")
 
 cp -a "$STAGING_DIR"/. "$SLUG_TMP"/
 
-if [[ -f $BUILD_DIR/Procfile ]]; then
-  cp "$BUILD_DIR/Procfile" "$SLUG_TMP/Procfile"
-fi
-if [[ -d $BUILD_DIR/.profile.d ]]; then
-  rm -rf "$SLUG_TMP/.profile.d"
-  cp -a "$BUILD_DIR/.profile.d" "$SLUG_TMP/.profile.d"
-fi
+# Names at $BUILD_DIR root that should survive the rewrite. Add to this list
+# if you chain another buildpack that contributes a slug-side directory.
+PRESERVE=(
+  Procfile     # user's process declarations
+  .profile.d   # PATH/env scripts contributed by buildpacks (e.g. heroku/jvm)
+  .jdk         # JDK installed by heroku/jvm
+  .heroku      # generic Heroku slug-side metadata
+)
+
+for name in "${PRESERVE[@]}"; do
+  [[ -e "$BUILD_DIR/$name" ]] || continue
+  rm -rf -- "$SLUG_TMP/$name"
+  cp -a "$BUILD_DIR/$name" "$SLUG_TMP/$name"
+done
 
 status "Replacing build dir with slug contents"
 cd /

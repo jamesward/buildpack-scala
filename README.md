@@ -46,7 +46,10 @@ sbt** — there is nothing version-specific or project-specific hardcoded.
 ## What the slug looks like
 
 After `bin/compile` runs, the build directory is replaced with the contents
-of the staged `universal/stage` directory:
+of the staged `universal/stage` directory. A handful of names are preserved
+across that rewrite — the user's `Procfile` and any slug-side contributions
+made by buildpacks that ran *before* this one (e.g. heroku/jvm bundles a
+JDK at `.jdk/` and a PATH/JAVA_HOME script at `.profile.d/jdk.sh`):
 
 ```
 .            <-- slug root
@@ -55,9 +58,19 @@ of the staged `universal/stage` directory:
 │   └── <app-name>.bat
 ├── lib/
 │   └── *.jar                # all runtime classpath jars
-├── Procfile                 # preserved from your repo (if any)
-└── .profile.d/              # preserved from your repo (if any)
+├── .jdk/                    # JDK, preserved from heroku/jvm
+├── .profile.d/              # env scripts (e.g. .profile.d/jdk.sh from heroku/jvm)
+├── .heroku/                 # generic Heroku slug-side metadata, preserved
+└── Procfile                 # preserved from your repo (if any)
 ```
+
+Without preserving `.jdk/` the dyno would start with no Java on `PATH`, since
+heroku/jvm's `.profile.d/jdk.sh` exports `PATH=$HOME/.jdk/bin:$PATH` and
+`$HOME/.jdk` would no longer exist.
+
+The set of preserved names lives in the `PRESERVE` array in `bin/compile`.
+Add to it if you chain another buildpack that contributes additional
+slug-side directories.
 
 ## Procfile
 

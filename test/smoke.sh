@@ -36,6 +36,21 @@ tar -C "$src" -cf - \
   --exclude='./project/project' \
   . | tar -C "$build" -xf -
 
+# Mimic what heroku/jvm contributes when chained before this buildpack:
+# a JDK at .jdk/ and a PATH/JAVA_HOME script at .profile.d/jdk.sh. We don't
+# bundle a real JDK — just sentinel files we can assert survive the rewrite.
+echo "-----> Planting heroku/jvm-style slug contributions (.jdk, .profile.d/jdk.sh)"
+mkdir -p "$build/.jdk/bin" "$build/.profile.d"
+cat > "$build/.jdk/bin/java" <<'EOF'
+#!/usr/bin/env bash
+echo "fake heroku/jvm java placeholder"
+EOF
+chmod +x "$build/.jdk/bin/java"
+cat > "$build/.profile.d/jdk.sh" <<'EOF'
+export JAVA_HOME="$HOME/.jdk"
+export PATH="$JAVA_HOME/bin:$PATH"
+EOF
+
 # bin/detect
 echo
 echo "-----> bin/detect"
@@ -79,6 +94,14 @@ if [[ -f $src/Procfile ]]; then
   [[ -f $build/Procfile ]] || { echo "FAIL: Procfile not preserved"; exit 1; }
   echo "       Procfile preserved: $(cat "$build/Procfile")"
 fi
+
+# heroku/jvm slug contributions must survive: .jdk/bin/java and .profile.d/jdk.sh
+[[ -x $build/.jdk/bin/java ]] \
+  || { echo "FAIL: .jdk/bin/java was wiped (heroku/jvm contribution lost)"; exit 1; }
+[[ -f $build/.profile.d/jdk.sh ]] \
+  || { echo "FAIL: .profile.d/jdk.sh was wiped"; exit 1; }
+echo "       .jdk/ preserved (size: $(du -sh "$build/.jdk" | cut -f1))"
+echo "       .profile.d/jdk.sh preserved"
 
 # bin/release
 echo
