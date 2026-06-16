@@ -109,6 +109,32 @@ in some sbt 2 environments — including Heroku's heroku-26 stack. `stage`
 and `show` are core sbt commands that don't depend on us injecting
 anything, so they work everywhere.
 
+## Multi-project builds (`SBT_PROJECT`)
+
+If your repo is a multi-project sbt build and a non-root subproject is
+the one whose `Universal / stage` should drive the slug, set the
+`SBT_PROJECT` config var to its sbt project ID:
+
+```sh
+heroku config:set SBT_PROJECT=server
+```
+
+`bin/compile` will then issue:
+
+1. `./sbt server/stage`
+2. `./sbt 'show server / Universal / stagingDirectory'`
+
+instead of the unscoped versions. When `SBT_PROJECT` is unset the
+buildpack uses sbt's current (root) project, which is the right default
+for single-project builds.
+
+The value must be a valid sbt project ID (alphanumerics + underscores —
+no hyphens or dots). For an explicit project definition like
+`lazy val server = project.in(file("server"))`, the ID is `server`. For
+implicit root projects sbt derives an ID from the directory name and
+sanitizes it, so explicit `lazy val` definitions are recommended when
+you intend to use `SBT_PROJECT`.
+
 ## Caching
 
 The following Coursier / Ivy / sbt directories are persisted in `CACHE_DIR`
@@ -203,6 +229,7 @@ buildpack-scala/
 │   └── util/
 │       └── sbt-env.sh   # shared cache + SBT_OPTS setup
 └── test/
-    ├── smoke.sh         # local end-to-end test of compile/release
-    └── ci-smoke.sh      # local end-to-end test of test-compile/test
+    ├── smoke.sh             # local end-to-end test of compile/release
+    ├── smoke-subproject.sh  # verifies SBT_PROJECT scoping (uses a stub sbt)
+    └── ci-smoke.sh          # local end-to-end test of test-compile/test
 ```

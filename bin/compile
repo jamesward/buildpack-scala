@@ -14,6 +14,11 @@
 #      the user-supplied Procfile and any slug-side contributions made by
 #      buildpacks that ran before this one (e.g. heroku/jvm's .jdk/).
 #
+# Multi-project builds: set the SBT_PROJECT config var to the subproject ID
+# whose `Universal / stage` should drive the slug (e.g.
+# `heroku config:set SBT_PROJECT=server`). When unset, the buildpack uses the
+# root project's `stage`.
+#
 # Result: the slug root *is* the staged universal directory. Procfile entries
 # must therefore be relative to the staging root (e.g. `web: bin/<exec>`).
 
@@ -73,17 +78,30 @@ cd "$BUILD_DIR"
 [[ -f ./sbt ]] || fail "no ./sbt wrapper in $BUILD_DIR"
 chmod +x ./sbt
 
-status "Running ./sbt stage"
-./sbt stage
+# Multi-project support: if SBT_PROJECT is set (typically via
+# `heroku config:set SBT_PROJECT=<id>`), scope every sbt command to that
+# subproject. When unset, sbt uses the current (root) project.
+SBT_PROJECT=${SBT_PROJECT:-}
+if [[ -n $SBT_PROJECT ]]; then
+  stage_cmd="$SBT_PROJECT/stage"
+  show_key="$SBT_PROJECT / Universal / stagingDirectory"
+  status "Targeting subproject: $SBT_PROJECT"
+else
+  stage_cmd="stage"
+  show_key="Universal / stagingDirectory"
+fi
 
-# Ask sbt for the staging directory path. `show Universal / stagingDirectory`
-# prints one line of the form `[info] /abs/path` to stdout. We grep for a line
-# that is exactly `[info] <single-token-path>` to avoid catching sbt's other
-# path-bearing log lines (e.g. "loading project definition from /...").
-status "Asking sbt for Universal / stagingDirectory"
-SBT_OUT=$(./sbt -no-colors 'show Universal / stagingDirectory' 2>&1) || {
+status "Running ./sbt $stage_cmd"
+./sbt "$stage_cmd"
+
+# Ask sbt for the staging directory path. `show <key>` prints one line of the
+# form `[info] /abs/path` to stdout. We grep for a line that is exactly
+# `[info] <single-token-path>` to avoid catching sbt's other path-bearing log
+# lines (e.g. "loading project definition from /...").
+status "Asking sbt for $show_key"
+SBT_OUT=$(./sbt -no-colors "show $show_key" 2>&1) || {
   echo "$SBT_OUT" >&2
-  fail "./sbt 'show Universal / stagingDirectory' failed"
+  fail "./sbt 'show $show_key' failed"
 }
 
 # Strip any stray ANSI escapes (defensive — -no-colors should already do it),
@@ -99,7 +117,7 @@ if [[ -z $STAGING_DIR || ! -d $STAGING_DIR ]]; then
   echo "----- ./sbt show output -----" >&2
   echo "$SBT_OUT" >&2
   echo "-----------------------------" >&2
-  fail "could not parse Universal / stagingDirectory from sbt output"
+  fail "could not parse $show_key from sbt output"
 fi
 
 status "Staging directory: ${STAGING_DIR#$BUILD_DIR/}"

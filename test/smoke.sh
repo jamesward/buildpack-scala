@@ -24,6 +24,13 @@ cache="$work/cache"
 env_dir="$work/env"
 mkdir -p "$build" "$cache" "$env_dir"
 
+# Optional: pass SBT_PROJECT through to bin/compile via the ENV_DIR mechanism
+# (Heroku passes config vars this way: one file per name, content is value).
+if [[ -n ${SBT_PROJECT:-} ]]; then
+  printf '%s' "$SBT_PROJECT" > "$env_dir/SBT_PROJECT"
+  echo "-----> Smoke test will run with SBT_PROJECT=$SBT_PROJECT"
+fi
+
 # Copy app source, skipping VCS / IDE / build-output / target dirs.
 # We use tar so we can exclude paths without depending on rsync.
 echo "-----> Staging $src into $build"
