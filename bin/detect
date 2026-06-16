@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Heroku classic buildpack: detect
+# Usage: bin/detect <BUILD_DIR>
+#
+# Succeeds when BUILD_DIR looks like an sbt project with a project-local
+# `./sbt` wrapper (sbt-native-packager + JavaAppPackaging is then assumed).
+set -euo pipefail
+
+BUILD_DIR=${1:-}
+
+if [[ -z $BUILD_DIR ]]; then
+  echo "usage: bin/detect <BUILD_DIR>" >&2
+  exit 1
+fi
+
+if [[ -f "$BUILD_DIR/build.sbt" && -f "$BUILD_DIR/sbt" ]]; then
+  echo "Scala (sbt-native-packager)"
+  exit 0
+fi
+
+exit 1

@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# Heroku classic buildpack: compile
+# Usage: bin/compile <BUILD_DIR> <CACHE_DIR> [ENV_DIR]
+#
+# Strategy:
+#   1. Point sbt/coursier/ivy caches at CACHE_DIR so deps persist between builds.
+#   2. Drop a buildpack-owned *.sbt file that defines a `buildpackStage` task.
+#      The task calls `(Universal / stage).value` (sbt-native-packager) and
+#      writes the absolute path of the staging dir to a file we name in the
+#      env var BUILDPACK_STAGE_DIR_FILE. This is how we *derive* the staging
+#      dir without hardcoding `target/out/jvm/scala-X/proj/universal/stage`.
+#   3. Run `./sbt buildpackStage` (which both stages and emits the path).
+#   4. Replace BUILD_DIR contents with the staging dir contents, preserving
+#      the user-supplied Procfile and .profile.d/ scripts.
+#
+# Result: the slug root *is* the staged universal directory. Procfile entries
+# must therefore be relative to the staging root (e.g. `web: bin/<exec>`).
+
+set -euo pipefail
+shopt -s dotglob nullglob
+
+BUILD_DIR=${1:-}
+CACHE_DIR=${2:-}
+ENV_DIR=${3:-}
+
+status() { echo "-----> $*"; }
+fail()   { echo " !     $*" >&2; exit 1; }
+
+[[ -n $BUILD_DIR ]] || fail "usage: bin/compile <BUILD_DIR> <CACHE_DIR> [ENV_DIR]"
+[[ -d $BUILD_DIR ]] || fail "BUILD_DIR not found: $BUILD_DIR"
+[[ -n $CACHE_DIR ]] || fail "CACHE_DIR not provided"
+mkdir -p "$CACHE_DIR"
+
+# Convert to absolute paths so we can chdir freely.
+BUILD_DIR=$(cd "$BUILD_DIR" && pwd)
+CACHE_DIR=$(cd "$CACHE_DIR" && pwd)
+
+# ---- export user config vars from ENV_DIR -----------------------------------
+# Heroku passes a directory of files; each filename is a config var name and
+# its content is the value. We expose them so sbt sees them at build time.
+if [[ -n $ENV_DIR && -d $ENV_DIR ]]; then
+  for f in "$ENV_DIR"/*; do
+    [[ -f $f ]] || continue
+    name=$(basename "$f")
+    # skip vars that would let users hijack the build
+    case "$name" in
+      PATH|GIT_DIR|LD_*|JAVA_TOOL_OPTIONS) continue ;;
+    esac
+    export "$name=$(cat "$f")"
+  done
+fi
+
+# ---- cleanup registry -------------------------------------------------------
+declare -a CLEANUP_PATHS=()
+cleanup() {
+  local rc=$?
+  for p in "${CLEANUP_PATHS[@]}"; do
+    rm -rf -- "$p" 2>/dev/null || true
+  done
+  exit $rc
+}
+trap cleanup EXIT
+
+# ---- caching ----------------------------------------------------------------
+# Persist coursier (sbt 2 default) + ivy + sbt boot across builds.
+# shellcheck source=bin/util/sbt-env.sh
+. "$(dirname "$0")/util/sbt-env.sh"
+sbt_env_configure "$CACHE_DIR"
+
+# ---- run sbt stage and capture the staging dir ------------------------------
+cd "$BUILD_DIR"
+[[ -f ./sbt ]] || fail "no ./sbt wrapper in $BUILD_DIR"
+chmod +x ./sbt
+
+EXTRACT_FILE="$BUILD_DIR/heroku-buildpack-scala.sbt"
+CLEANUP_PATHS+=("$EXTRACT_FILE")
+
+# The task is registered with the implicit auto-imports of any project that
+# enables JavaAppPackaging (which auto-imports `Universal`). If a project
+# doesn't enable it, the task definition itself will fail to compile, which
+# is the correct behaviour: this buildpack only handles JavaAppPackaging.
+cat > "$EXTRACT_FILE" <<'EOF'
+TaskKey[Unit]("buildpackStage") := {
+  val staged = (Universal / stage).value
+  val outFile = file(sys.env.getOrElse(
+    "BUILDPACK_STAGE_DIR_FILE",
+    sys.error("BUILDPACK_STAGE_DIR_FILE env var not set")
+  ))
+  IO.write(outFile, staged.getAbsolutePath)
+  streams.value.log.info(s"buildpack: staged at ${staged.getAbsolutePath}")
+}
+EOF
+
+STAGE_DIR_FILE=$(mktemp)
+CLEANUP_PATHS+=("$STAGE_DIR_FILE")
+export BUILDPACK_STAGE_DIR_FILE="$STAGE_DIR_FILE"
+
+status "Running ./sbt buildpackStage"
+./sbt buildpackStage
+
+[[ -s $STAGE_DIR_FILE ]] || fail "sbt did not record a staging directory"
+STAGING_DIR=$(<"$STAGE_DIR_FILE")
+[[ -d $STAGING_DIR ]] || fail "reported staging directory does not exist: $STAGING_DIR"
+
+status "Staging directory: ${STAGING_DIR#$BUILD_DIR/}"
+
+# ---- assemble the slug ------------------------------------------------------
+# Copy staged contents into a temp dir, then preserve user-controlled runtime
+# files (Procfile, .profile.d) on top of them, then atomically replace the
+# build dir contents.
+SLUG_TMP=$(mktemp -d)
+CLEANUP_PATHS+=("$SLUG_TMP")
+
+cp -a "$STAGING_DIR"/. "$SLUG_TMP"/
+
+if [[ -f $BUILD_DIR/Procfile ]]; then
+  cp "$BUILD_DIR/Procfile" "$SLUG_TMP/Procfile"
+fi
+if [[ -d $BUILD_DIR/.profile.d ]]; then
+  rm -rf "$SLUG_TMP/.profile.d"
+  cp -a "$BUILD_DIR/.profile.d" "$SLUG_TMP/.profile.d"
+fi
+
+status "Replacing build dir with slug contents"
+cd /
+find "$BUILD_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+cp -a "$SLUG_TMP"/. "$BUILD_DIR"/
+
+status "Slug root contents: $(cd "$BUILD_DIR" && ls)"
