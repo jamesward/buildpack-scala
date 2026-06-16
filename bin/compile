@@ -4,14 +4,15 @@
 #
 # Strategy:
 #   1. Point sbt/coursier/ivy caches at CACHE_DIR so deps persist between builds.
-#   2. Drop a buildpack-owned *.sbt file that defines a `buildpackStage` task.
-#      The task calls `(Universal / stage).value` (sbt-native-packager) and
-#      writes the absolute path of the staging dir to a file we name in the
-#      env var BUILDPACK_STAGE_DIR_FILE. This is how we *derive* the staging
-#      dir without hardcoding `target/out/jvm/scala-X/proj/universal/stage`.
-#   3. Run `./sbt buildpackStage` (which both stages and emits the path).
+#   2. Run `./sbt stage` to stage the app (sbt-native-packager's task).
+#   3. Run a second `./sbt 'show Universal / stagingDirectory'` and parse the
+#      printed path. Two cold starts is fine — the path needs to come from
+#      sbt itself (`target/out/jvm/scala-X/proj/universal/stage` varies by
+#      Scala version and project name) and `show <key>` is core sbt and is
+#      reliable in every environment.
 #   4. Replace BUILD_DIR contents with the staging dir contents, preserving
-#      the user-supplied Procfile and .profile.d/ scripts.
+#      the user-supplied Procfile and any slug-side contributions made by
+#      buildpacks that ran before this one (e.g. heroku/jvm's .jdk/).
 #
 # Result: the slug root *is* the staged universal directory. Procfile entries
 # must therefore be relative to the staging root (e.g. `web: bin/<exec>`).
@@ -72,35 +73,34 @@ cd "$BUILD_DIR"
 [[ -f ./sbt ]] || fail "no ./sbt wrapper in $BUILD_DIR"
 chmod +x ./sbt
 
-EXTRACT_FILE="$BUILD_DIR/heroku-buildpack-scala.sbt"
-CLEANUP_PATHS+=("$EXTRACT_FILE")
+status "Running ./sbt stage"
+./sbt stage
 
-# The task is registered with the implicit auto-imports of any project that
-# enables JavaAppPackaging (which auto-imports `Universal`). If a project
-# doesn't enable it, the task definition itself will fail to compile, which
-# is the correct behaviour: this buildpack only handles JavaAppPackaging.
-cat > "$EXTRACT_FILE" <<'EOF'
-TaskKey[Unit]("buildpackStage") := {
-  val staged = (Universal / stage).value
-  val outFile = file(sys.env.getOrElse(
-    "BUILDPACK_STAGE_DIR_FILE",
-    sys.error("BUILDPACK_STAGE_DIR_FILE env var not set")
-  ))
-  IO.write(outFile, staged.getAbsolutePath)
-  streams.value.log.info(s"buildpack: staged at ${staged.getAbsolutePath}")
+# Ask sbt for the staging directory path. `show Universal / stagingDirectory`
+# prints one line of the form `[info] /abs/path` to stdout. We grep for a line
+# that is exactly `[info] <single-token-path>` to avoid catching sbt's other
+# path-bearing log lines (e.g. "loading project definition from /...").
+status "Asking sbt for Universal / stagingDirectory"
+SBT_OUT=$(./sbt -no-colors 'show Universal / stagingDirectory' 2>&1) || {
+  echo "$SBT_OUT" >&2
+  fail "./sbt 'show Universal / stagingDirectory' failed"
 }
-EOF
 
-STAGE_DIR_FILE=$(mktemp)
-CLEANUP_PATHS+=("$STAGE_DIR_FILE")
-export BUILDPACK_STAGE_DIR_FILE="$STAGE_DIR_FILE"
+# Strip any stray ANSI escapes (defensive — -no-colors should already do it),
+# CRs, and look for the value line.
+STAGING_DIR=$(printf '%s\n' "$SBT_OUT" \
+  | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' \
+  | tr -d '\r' \
+  | grep -E '^\[info\] /[^[:space:]]+$' \
+  | tail -1 \
+  | sed 's/^\[info\] //')
 
-status "Running ./sbt buildpackStage"
-./sbt buildpackStage
-
-[[ -s $STAGE_DIR_FILE ]] || fail "sbt did not record a staging directory"
-STAGING_DIR=$(<"$STAGE_DIR_FILE")
-[[ -d $STAGING_DIR ]] || fail "reported staging directory does not exist: $STAGING_DIR"
+if [[ -z $STAGING_DIR || ! -d $STAGING_DIR ]]; then
+  echo "----- ./sbt show output -----" >&2
+  echo "$SBT_OUT" >&2
+  echo "-----------------------------" >&2
+  fail "could not parse Universal / stagingDirectory from sbt output"
+fi
 
 status "Staging directory: ${STAGING_DIR#$BUILD_DIR/}"
 

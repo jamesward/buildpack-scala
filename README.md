@@ -5,10 +5,11 @@ for Scala apps built with **sbt 2** and packaged with the
 [sbt-native-packager](https://github.com/sbt/sbt-native-packager)
 `JavaAppPackaging` plugin.
 
-It runs `./sbt stage` (via a buildpack-injected sbt task) and turns the
-resulting `universal/stage` directory into the slug. The exact path under
+It runs `./sbt stage` and turns the resulting `universal/stage` directory
+into the slug. The exact path under
 `target/out/jvm/scala-<version>/<project>/universal/stage` is **derived from
-sbt** — there is nothing version-specific or project-specific hardcoded.
+sbt** (via `./sbt 'show Universal / stagingDirectory'`) — there is nothing
+version-specific or project-specific hardcoded.
 
 ## Requirements
 
@@ -87,25 +88,26 @@ executable script in `bin/` (excluding `*.bat`) as the default `web` process.
 
 ## How the staging dir is derived
 
-`bin/compile` writes a temporary `.heroku-buildpack-scala.sbt` at the repo
-root containing:
+`bin/compile` runs sbt twice, in two separate invocations:
 
-```scala
-TaskKey[Unit]("buildpackStage") := {
-  val staged = (Universal / stage).value
-  val outFile = file(sys.env.getOrElse(
-    "BUILDPACK_STAGE_DIR_FILE",
-    sys.error("BUILDPACK_STAGE_DIR_FILE env var not set")
-  ))
-  IO.write(outFile, staged.getAbsolutePath)
-  streams.value.log.info(s"buildpack: staged at ${staged.getAbsolutePath}")
-}
-```
+1. `./sbt stage` — sbt-native-packager's task that produces the staged
+   `universal/stage` directory.
+2. `./sbt 'show Universal / stagingDirectory'` — sbt's built-in `show`
+   command prints the absolute path of `Universal / stagingDirectory`
+   (a setting from sbt-native-packager) to stdout.
 
-It then runs `./sbt buildpackStage`, which both stages the app and writes the
-absolute path of `(Universal / stage).value` to the file named by
-`BUILDPACK_STAGE_DIR_FILE`. The script reads that file, copies the directory's
-contents into the slug, and removes the temporary `.sbt` file.
+The compile script grabs that second invocation's output and pulls the
+path out of it with a strict regex — it looks for a line that matches
+`^[info] /<path-with-no-spaces>$`, which is what `show` emits for a
+`File`-typed setting and which doesn't match sbt's other path-bearing
+log lines (e.g. `[info] loading project definition from /...`).
+
+We deliberately use two cold sbt boots (instead of injecting a custom
+task or piggy-backing both commands on a single boot) because a custom
+task injected via a `*.sbt` file has been observed to silently not run
+in some sbt 2 environments — including Heroku's heroku-26 stack. `stage`
+and `show` are core sbt commands that don't depend on us injecting
+anything, so they work everywhere.
 
 ## Caching
 
