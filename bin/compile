@@ -122,6 +122,47 @@ fi
 
 status "Staging directory: ${STAGING_DIR#$BUILD_DIR/}"
 
+# ---- locate the Procfile that applies to this slug --------------------------
+# The slug root *is* the staging dir. For a multi-project build that staging
+# dir belongs to the subproject named by SBT_PROJECT, so the Procfile that
+# should ship is the one in that subproject's directory — not the repo root.
+# The sbt project ID need not match its directory name, so ask sbt for the
+# subproject's baseDirectory rather than guessing `$BUILD_DIR/$SBT_PROJECT`.
+# (Single-project builds use the repo-root Procfile, so we skip this extra
+# cold boot for them.)
+PROJECT_BASE=""
+if [[ -n $SBT_PROJECT ]]; then
+  base_key="$SBT_PROJECT / baseDirectory"
+  status "Asking sbt for $base_key"
+  BASE_OUT=$(./sbt -no-colors "show $base_key" 2>&1) || {
+    echo "$BASE_OUT" >&2
+    fail "./sbt 'show $base_key' failed"
+  }
+  PROJECT_BASE=$(printf '%s\n' "$BASE_OUT" \
+    | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' \
+    | tr -d '\r' \
+    | grep -E '^\[info\] /[^[:space:]]+$' \
+    | tail -1 \
+    | sed 's/^\[info\] //')
+  if [[ -z $PROJECT_BASE || ! -d $PROJECT_BASE ]]; then
+    echo "----- ./sbt show output -----" >&2
+    echo "$BASE_OUT" >&2
+    echo "-----------------------------" >&2
+    fail "could not parse $base_key from sbt output"
+  fi
+  status "Subproject base directory: ${PROJECT_BASE#$BUILD_DIR/}"
+fi
+
+# Prefer the subproject's Procfile (multi-project), fall back to the repo-root
+# Procfile (single-project, or a multi-project build that keeps its Procfile
+# at the root).
+PROCFILE_SRC=""
+if [[ -n $PROJECT_BASE && -f "$PROJECT_BASE/Procfile" ]]; then
+  PROCFILE_SRC="$PROJECT_BASE/Procfile"
+elif [[ -f "$BUILD_DIR/Procfile" ]]; then
+  PROCFILE_SRC="$BUILD_DIR/Procfile"
+fi
+
 # ---- assemble the slug ------------------------------------------------------
 # Copy staged contents into a temp dir, then preserve user-controlled runtime
 # files AND slug contributions made by earlier buildpacks (heroku/jvm bundles
@@ -135,8 +176,9 @@ cp -a "$STAGING_DIR"/. "$SLUG_TMP"/
 
 # Names at $BUILD_DIR root that should survive the rewrite. Add to this list
 # if you chain another buildpack that contributes a slug-side directory.
+# NOTE: the Procfile is handled separately below — its source location depends
+# on whether this is a multi-project build (see PROCFILE_SRC above).
 PRESERVE=(
-  Procfile     # user's process declarations
   .profile.d   # PATH/env scripts contributed by buildpacks (e.g. heroku/jvm)
   .jdk         # JDK installed by heroku/jvm
   .heroku      # generic Heroku slug-side metadata
@@ -147,6 +189,14 @@ for name in "${PRESERVE[@]}"; do
   rm -rf -- "$SLUG_TMP/$name"
   cp -a "$BUILD_DIR/$name" "$SLUG_TMP/$name"
 done
+
+# Ship the applicable Procfile (subproject's for multi-project builds, else
+# the repo-root one) at the slug root, where Heroku expects it.
+if [[ -n $PROCFILE_SRC ]]; then
+  rm -rf -- "$SLUG_TMP/Procfile"
+  cp -a "$PROCFILE_SRC" "$SLUG_TMP/Procfile"
+  status "Using Procfile from ${PROCFILE_SRC#$BUILD_DIR/}"
+fi
 
 status "Replacing build dir with slug contents"
 cd /

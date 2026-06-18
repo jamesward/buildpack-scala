@@ -86,6 +86,12 @@ web: bin/hello-zio-http
 If you omit the `Procfile`, the buildpack's `bin/release` step picks the first
 executable script in `bin/` (excluding `*.bat`) as the default `web` process.
 
+For **multi-project builds** (`SBT_PROJECT` set, see below) the `Procfile`
+should live in the targeted subproject's directory (e.g. `server/Procfile`),
+because that subproject's staging dir is what becomes the slug. The buildpack
+reads it from there and ships it at the slug root. If the subproject has no
+`Procfile`, the buildpack falls back to a repo-root `Procfile`.
+
 ## How the staging dir is derived
 
 `bin/compile` runs sbt twice, in two separate invocations:
@@ -123,10 +129,19 @@ heroku config:set SBT_PROJECT=server
 
 1. `./sbt server/stage`
 2. `./sbt 'show server / Universal / stagingDirectory'`
+3. `./sbt 'show server / baseDirectory'`
 
 instead of the unscoped versions. When `SBT_PROJECT` is unset the
 buildpack uses sbt's current (root) project, which is the right default
-for single-project builds.
+for single-project builds (and skips the third invocation — the
+repo-root `Procfile` is used directly).
+
+The third invocation locates the subproject's `Procfile`: its staging
+dir becomes the slug root, so the buildpack reads
+`<subproject baseDirectory>/Procfile` and ships it at the slug root,
+falling back to a repo-root `Procfile` if the subproject has none. The
+base directory is asked of sbt rather than guessed from `SBT_PROJECT`,
+because a project's ID need not match its directory name.
 
 The value must be a valid sbt project ID (alphanumerics + underscores —
 no hyphens or dots). For an explicit project definition like
