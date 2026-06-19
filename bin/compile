@@ -32,6 +32,12 @@ ENV_DIR=${3:-}
 status() { echo "-----> $*"; }
 fail()   { echo " !     $*" >&2; exit 1; }
 
+# Strip sbt 2.0 supershell / ANSI control sequences and CRs. sbt 2.0 emits an
+# `ESC[0J` (erase-below) after task output even with -no-colors, and on a cold
+# build can render the value line without a trailing newline — gluing it to the
+# following `[success]` line. Both are normalized away here.
+strip_ansi() { sed 's/\x1b\[[0-9;?]*[A-Za-z]//g' | tr -d '\r'; }
+
 [[ -n $BUILD_DIR ]] || fail "usage: bin/compile <BUILD_DIR> <CACHE_DIR> [ENV_DIR]"
 [[ -d $BUILD_DIR ]] || fail "BUILD_DIR not found: $BUILD_DIR"
 [[ -n $CACHE_DIR ]] || fail "CACHE_DIR not provided"
@@ -94,30 +100,42 @@ fi
 status "Running ./sbt $stage_cmd"
 ./sbt "$stage_cmd"
 
-# Ask sbt for the staging directory path. `show <key>` prints one line of the
-# form `[info] /abs/path` to stdout. We grep for a line that is exactly
-# `[info] <single-token-path>` to avoid catching sbt's other path-bearing log
-# lines (e.g. "loading project definition from /...").
+# Ask sbt for the staging directory path. With sbt 2.0 we disable the
+# supershell so task output is plain, newline-terminated log lines instead of
+# cursor-addressed redraws. We still defensively strip any residual escapes.
+#
+# Extraction is deliberately tolerant: rather than requiring a pristine
+# `[info] <path>` line (which sbt 2.0's supershell can mangle by gluing the
+# value to the next `[success]` line), we pull the first absolute path that
+# ends in `universal/stage`. A non-match yields an empty string (never a
+# pipeline failure), so the explicit check below — not `set -e` — owns the
+# error path and always prints the captured output for triage.
 status "Asking sbt for $show_key"
-SBT_OUT=$(./sbt -no-colors "show $show_key" 2>&1) || {
+set +e
+SBT_OUT=$(./sbt -no-colors -Dsbt.supershell=false "show $show_key" 2>&1)
+SBT_RC=$?
+set -e
+if [[ $SBT_RC -ne 0 ]]; then
+  echo "----- ./sbt show output -----" >&2
   echo "$SBT_OUT" >&2
-  fail "./sbt 'show $show_key' failed"
-}
+  echo "-----------------------------" >&2
+  fail "./sbt 'show $show_key' failed (exit $SBT_RC)"
+fi
 
-# Strip any stray ANSI escapes (defensive — -no-colors should already do it),
-# CRs, and look for the value line.
-STAGING_DIR=$(printf '%s\n' "$SBT_OUT" \
-  | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' \
-  | tr -d '\r' \
-  | grep -E '^\[info\] /[^[:space:]]+$' \
-  | tail -1 \
-  | sed 's/^\[info\] //')
+STAGING_DIR=$(printf '%s\n' "$SBT_OUT" | strip_ansi | grep -oE '/[^[:space:]]*/universal/stage' | tail -1 || true)
+
+# Filesystem fallback: after `<proj>/stage` runs, the directory exists on disk
+# regardless of how sbt logged its path. This makes the buildpack resilient to
+# future sbt output-format changes.
+if [[ -z $STAGING_DIR || ! -d $STAGING_DIR ]]; then
+  STAGING_DIR=$(find "$BUILD_DIR/target" -type d -path "*${SBT_PROJECT:+/$SBT_PROJECT}/universal/stage" 2>/dev/null | sort | tail -1 || true)
+fi
 
 if [[ -z $STAGING_DIR || ! -d $STAGING_DIR ]]; then
   echo "----- ./sbt show output -----" >&2
   echo "$SBT_OUT" >&2
   echo "-----------------------------" >&2
-  fail "could not parse $show_key from sbt output"
+  fail "could not determine the staging directory for '$show_key'"
 fi
 
 status "Staging directory: ${STAGING_DIR#$BUILD_DIR/}"
@@ -134,21 +152,31 @@ PROJECT_BASE=""
 if [[ -n $SBT_PROJECT ]]; then
   base_key="$SBT_PROJECT / baseDirectory"
   status "Asking sbt for $base_key"
-  BASE_OUT=$(./sbt -no-colors "show $base_key" 2>&1) || {
+  set +e
+  BASE_OUT=$(./sbt -no-colors -Dsbt.supershell=false "show $base_key" 2>&1)
+  BASE_RC=$?
+  set -e
+  if [[ $BASE_RC -ne 0 ]]; then
+    echo "----- ./sbt show output -----" >&2
     echo "$BASE_OUT" >&2
-    fail "./sbt 'show $base_key' failed"
-  }
-  PROJECT_BASE=$(printf '%s\n' "$BASE_OUT" \
-    | sed 's/\x1b\[[0-9;]*[A-Za-z]//g' \
-    | tr -d '\r' \
-    | grep -E '^\[info\] /[^[:space:]]+$' \
-    | tail -1 \
-    | sed 's/^\[info\] //')
+    echo "-----------------------------" >&2
+    fail "./sbt 'show $base_key' failed (exit $BASE_RC)"
+  fi
+  # The base dir is an absolute path on its own `[info]` line. Tolerate escapes
+  # and value/[success] gluing the same way as the staging-dir lookup.
+  PROJECT_BASE=$(printf '%s\n' "$BASE_OUT" | strip_ansi \
+    | sed -nE 's/.*[[:space:]](\/[^[:space:]]+)([[:space:]].*)?$/\1/p' \
+    | grep -vE '/universal/stage$' \
+    | tail -1 || true)
+  # Fallback: a subproject whose directory name matches its id.
+  if [[ -z $PROJECT_BASE || ! -d $PROJECT_BASE ]] && [[ -d "$BUILD_DIR/$SBT_PROJECT" ]]; then
+    PROJECT_BASE="$BUILD_DIR/$SBT_PROJECT"
+  fi
   if [[ -z $PROJECT_BASE || ! -d $PROJECT_BASE ]]; then
     echo "----- ./sbt show output -----" >&2
     echo "$BASE_OUT" >&2
     echo "-----------------------------" >&2
-    fail "could not parse $base_key from sbt output"
+    fail "could not determine $base_key from sbt output"
   fi
   status "Subproject base directory: ${PROJECT_BASE#$BUILD_DIR/}"
 fi

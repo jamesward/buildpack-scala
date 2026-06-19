@@ -13,7 +13,9 @@ build="$work/build"
 cache="$work/cache"
 env_dir="$work/env"
 log="$work/sbt-stub.log"
-fake_stage="$work/fake-staging-dir"
+# Mirror sbt-native-packager's real layout: the staging dir always ends in
+# `universal/stage`. bin/compile keys on that suffix, so the stub must too.
+fake_stage="$build/target/out/jvm/scala-3.8.4/myproj/universal/stage"
 fake_base="$build/myproj-dir"
 mkdir -p "$build" "$cache" "$env_dir" "$build/project" "$fake_stage" "$fake_base"
 
