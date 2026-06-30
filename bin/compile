@@ -214,7 +214,7 @@ PRESERVE=(
 
 for name in "${PRESERVE[@]}"; do
   [[ -e "$BUILD_DIR/$name" ]] || continue
-  rm -rf -- "$SLUG_TMP/$name"
+  rm -rf -- "${SLUG_TMP:?}/$name"
   cp -a "$BUILD_DIR/$name" "$SLUG_TMP/$name"
 done
 
