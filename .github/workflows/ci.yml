@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Static analysis of every bash script in the buildpack. The scripts use
+  # `# shellcheck source=` directives, so we run with -x to follow sources.
+  # ---------------------------------------------------------------------------
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Lint buildpack scripts
+        run: |
+          shellcheck -x --severity=warning \
+            bin/detect \
+            bin/compile \
+            bin/release \
+            bin/test \
+            bin/test-compile \
+            bin/util/sbt-env.sh \
+            test/smoke.sh \
+            test/smoke-subproject.sh \
+            test/ci-smoke.sh
+
+  # ---------------------------------------------------------------------------
+  # Self-contained: drives bin/compile with a stub `./sbt` to verify the
+  # SBT_PROJECT multi-project scoping logic. No JDK or network required.
+  # ---------------------------------------------------------------------------
+  smoke-subproject:
+    name: Smoke (SBT_PROJECT scoping)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run subproject smoke test
+        run: ./test/smoke-subproject.sh
+
+  # ---------------------------------------------------------------------------
+  # End-to-end: stage and test a real (tiny) sbt-native-packager app through
+  # bin/detect + bin/compile + bin/release (smoke.sh) and the Heroku CI
+  # testpack flow bin/test-compile + bin/test (ci-smoke.sh).
+  # ---------------------------------------------------------------------------
+  smoke-e2e:
+    name: Smoke (end-to-end)
+    runs-on: ubuntu-latest
+    env:
+      SAMPLE_APP: ${{ github.workspace }}/test/fixtures/sample-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: sbt
+
+      - name: Set up sbt
+        uses: sbt/setup-sbt@v1
+
+      - name: Smoke test compile + release
+        run: ./test/smoke.sh
+
+      - name: Smoke test the Heroku CI testpack flow
+        run: ./test/ci-smoke.sh
