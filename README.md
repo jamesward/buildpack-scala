@@ -230,6 +230,26 @@ buildpack at it with a temp `CACHE_DIR`, and verifies the slug layout.
 ./test/smoke.sh
 ```
 
+By default the smoke tests look for a sample app at
+`~/projects/hello/hello-zio-http`. Set `SAMPLE_APP` to point them at any
+sbt-native-packager app, e.g. the tiny fixture used by CI:
+
+```sh
+SAMPLE_APP=./test/fixtures/sample-app ./test/smoke.sh
+SAMPLE_APP=./test/fixtures/sample-app ./test/ci-smoke.sh
+```
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push to `main` and on pull requests:
+
+- **ShellCheck** lints every buildpack script.
+- **Smoke (SBT_PROJECT scoping)** runs `test/smoke-subproject.sh`, which drives
+  `bin/compile` with a stub `./sbt` (no JDK or network needed).
+- **Smoke (end-to-end)** stages and tests the `test/fixtures/sample-app`
+  sbt-native-packager app through `bin/compile`/`bin/release` and the Heroku CI
+  testpack flow (`bin/test-compile`/`bin/test`).
+
 ## Layout
 
 ```
@@ -243,8 +263,13 @@ buildpack-scala/
 │   ├── test          # ./sbt test (exit code = test result)
 │   └── util/
 │       └── sbt-env.sh   # shared cache + SBT_OPTS setup
-└── test/
-    ├── smoke.sh             # local end-to-end test of compile/release
-    ├── smoke-subproject.sh  # verifies SBT_PROJECT scoping (uses a stub sbt)
-    └── ci-smoke.sh          # local end-to-end test of test-compile/test
+├── test/
+│   ├── smoke.sh             # local end-to-end test of compile/release
+│   ├── smoke-subproject.sh  # verifies SBT_PROJECT scoping (uses a stub sbt)
+│   ├── ci-smoke.sh          # local end-to-end test of test-compile/test
+│   └── fixtures/
+│       └── sample-app/      # tiny sbt-native-packager app the smoke tests use
+└── .github/
+    └── workflows/
+        └── ci.yml           # ShellCheck + smoke tests on push / PR
 ```

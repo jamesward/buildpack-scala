@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Project-local sbt wrapper. The buildpack's bin/detect requires a `./sbt`
+# in the app root and every bin/* script invokes it as `./sbt ...`. Real
+# Heroku apps ship the sbt-extras launcher here; for the smoke fixture we
+# just delegate to whatever sbt is on PATH (installed by CI / the dev env).
+exec sbt "$@"
