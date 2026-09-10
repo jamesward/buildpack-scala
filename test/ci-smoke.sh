@@ -65,11 +65,14 @@ echo "-----> Verifying test slug layout"
 [[ -d $build/src/test/scala ]]                  || { echo "FAIL: src/test/scala missing"; exit 1; }
 [[ -d $build/.heroku-sbt-cache ]]               || { echo "FAIL: in-slug sbt cache missing"; exit 1; }
 [[ -d $build/.heroku-sbt-cache/coursier/v1 ]]   || { echo "FAIL: coursier cache not in slug"; exit 1; }
-echo "       source tree intact, in-slug cache present"
+[[ -d $build/.heroku-sbt-task-cache/v2 ]]       || { echo "FAIL: build-scoped sbt task cache missing"; exit 1; }
+echo "       source tree intact, dependency and build-scoped task caches present"
 
 # ---- assert cache was persisted to CACHE_DIR --------------------------------
 [[ -d $cache/sbt-cache ]] || { echo "FAIL: cache not written back to CACHE_DIR"; exit 1; }
-echo "       CACHE_DIR/sbt-cache populated for cross-CI-run caching"
+[[ ! -d $cache/sbt-cache/sbt/cache/v2 ]] \
+  || { echo "FAIL: sbt task outputs leaked into cross-CI-run cache"; exit 1; }
+echo "       CACHE_DIR/sbt-cache contains dependencies but not sbt task outputs"
 
 # ---- bin/test (no CACHE_DIR — mimics Heroku test dyno) ---------------------
 echo

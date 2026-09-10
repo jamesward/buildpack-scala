@@ -74,10 +74,15 @@ cleanup() {
 trap cleanup EXIT
 
 # ---- caching ----------------------------------------------------------------
-# Persist coursier (sbt 2 default) + ivy + sbt boot across builds.
+# Persist downloaded dependencies, but keep sbt 2's automatic task-output
+# cache build-scoped. Persisting the latter can restore under-keyed plugin
+# outputs from an older dependency graph (notably native-packager launcher
+# JAR manifests), producing a slug whose lib/ and launcher classpath disagree.
+TASK_CACHE_DIR="$BUILD_DIR/.heroku-sbt-task-cache"
+CLEANUP_PATHS+=("$TASK_CACHE_DIR")
 # shellcheck source=bin/util/sbt-env.sh
 . "$(dirname "$0")/util/sbt-env.sh"
-sbt_env_configure "$CACHE_DIR"
+sbt_env_configure "$CACHE_DIR" "$TASK_CACHE_DIR"
 
 # ---- run sbt stage and capture the staging dir ------------------------------
 cd "$BUILD_DIR"

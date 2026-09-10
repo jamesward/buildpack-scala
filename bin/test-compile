@@ -60,9 +60,12 @@ if [[ -d $PERSIST_CACHE ]]; then
   cp -a "$PERSIST_CACHE"/. "$SLUG_CACHE"/ 2>/dev/null || true
 fi
 
+# Keep sbt 2 task outputs in this test slug so bin/test can reuse them, but
+# outside SLUG_CACHE so they are not copied into the next CI run's cache.
+TASK_CACHE="$BUILD_DIR/.heroku-sbt-task-cache"
 # shellcheck source=bin/util/sbt-env.sh
 . "$(dirname "$0")/util/sbt-env.sh"
-sbt_env_configure "$SLUG_CACHE"
+sbt_env_configure "$SLUG_CACHE" "$TASK_CACHE"
 
 # ---- compile main + test sources --------------------------------------------
 cd "$BUILD_DIR"

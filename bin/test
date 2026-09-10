@@ -36,10 +36,11 @@ fi
 
 # ---- caching ----------------------------------------------------------------
 SLUG_CACHE="$BUILD_DIR/.heroku-sbt-cache"
+TASK_CACHE="$BUILD_DIR/.heroku-sbt-task-cache"
 
 # shellcheck source=bin/util/sbt-env.sh
 . "$(dirname "$0")/util/sbt-env.sh"
-sbt_env_configure "$SLUG_CACHE"
+sbt_env_configure "$SLUG_CACHE" "$TASK_CACHE"
 
 # ---- run tests --------------------------------------------------------------
 cd "$BUILD_DIR"

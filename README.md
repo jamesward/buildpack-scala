@@ -160,6 +160,13 @@ between builds, so subsequent deploys do not re-download dependencies:
 - `sbt/boot/`    (sbt launcher boot dir)
 - `sbt/`         (sbt global base)
 
+sbt 2 also has a machine-wide automatic task-output cache. Because plugin tasks
+can be under-keyed, that cache is deliberately redirected to the build-scoped
+`BUILD_DIR/.heroku-sbt-task-cache` rather than persisted in `CACHE_DIR`. In
+particular, persisting it can restore an old sbt-native-packager launcher JAR
+whose manifest names no longer match the dependency JARs staged in `lib/`.
+Dependency downloads remain cached; generated build outputs do not cross deploys.
+
 The buildpack sets `COURSIER_CACHE` and `SBT_OPTS` accordingly before invoking
 `./sbt`.
 
