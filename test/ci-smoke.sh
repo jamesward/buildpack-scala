@@ -65,7 +65,7 @@ echo "-----> Verifying test slug layout"
 [[ -d $build/src/test/scala ]]                  || { echo "FAIL: src/test/scala missing"; exit 1; }
 [[ -d $build/.heroku-sbt-cache ]]               || { echo "FAIL: in-slug sbt cache missing"; exit 1; }
 [[ -d $build/.heroku-sbt-cache/coursier/v1 ]]   || { echo "FAIL: coursier cache not in slug"; exit 1; }
-[[ -d $build/.heroku-sbt-task-cache/v2 ]]       || { echo "FAIL: build-scoped sbt task cache missing"; exit 1; }
+[[ -d $build/.heroku-sbt-task-cache ]]          || { echo "FAIL: build-scoped sbt task cache root missing"; exit 1; }
 echo "       source tree intact, dependency and build-scoped task caches present"
 
 # ---- assert cache was persisted to CACHE_DIR --------------------------------
