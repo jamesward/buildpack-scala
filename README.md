@@ -69,6 +69,40 @@ Without preserving `.jdk/` the dyno would start with no Java on `PATH`, since
 heroku/jvm's `.profile.d/jdk.sh` exports `PATH=$HOME/.jdk/bin:$PATH` and
 `$HOME/.jdk` would no longer exist.
 
+## Runtime Java memory settings
+
+The required `heroku/jvm` buildpack owns runtime JVM memory configuration. It
+installs `.profile.d/jvmcommon.sh`, which Heroku sources when each dyno starts,
+after config vars are available. The script reads the dyno's cgroup memory
+limit and adds the corresponding defaults to `JAVA_TOOL_OPTIONS`, so resizing
+a dyno updates its JVM settings on restart without rebuilding the slug.
+
+For example, on a 512 MiB Basic dyno the current defaults include:
+
+```
+-XX:MaxRAM=536870912 -Xmx300m -Xss512k -XX:CICompilerCount=2
+```
+
+This buildpack deliberately does not install a second memory calculator. To
+override Heroku's defaults, set `JAVA_TOOL_OPTIONS`; custom options are placed
+after the defaults and therefore take precedence when the same JVM setting is
+specified more than once:
+
+```sh
+heroku config:set JAVA_TOOL_OPTIONS='-Xmx384m -Xss512k'
+```
+
+JVM flags placed directly in a `Procfile` command have the highest precedence.
+
+### Exit on OutOfMemoryError
+
+The buildpack adds `-XX:+ExitOnOutOfMemoryError` to `JAVA_TOOL_OPTIONS` (in
+`.profile.d/zz-buildpack-scala.sh`, sourced after heroku/jvm's script), so a JVM
+that runs out of memory exits and Heroku restarts the dyno, instead of leaving a
+process that can't allocate. It's skipped when `JAVA_TOOL_OPTIONS` or `JAVA_OPTS`
+already mention `ExitOnOutOfMemoryError` or `CrashOnOutOfMemoryError`; set
+`BUILDPACK_SCALA_EXIT_ON_OOM=false` to turn it off.
+
 The set of preserved names lives in the `PRESERVE` array in `bin/compile`.
 Add to it if you chain another buildpack that contributes additional
 slug-side directories.

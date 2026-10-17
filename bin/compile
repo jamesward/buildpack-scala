@@ -236,4 +236,24 @@ cd /
 find "$BUILD_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
 cp -a "$SLUG_TMP"/. "$BUILD_DIR"/
 
+# ---- runtime JVM defaults ---------------------------------------------------
+# Exit the JVM on OutOfMemoryError, so Heroku restarts the dyno instead of
+# leaving a process that can no longer allocate (and may stop serving while
+# staying "up"). Heroku sources .profile.d/*.sh in name order when a dyno
+# starts, after config vars are set; the zz- prefix runs this after heroku/jvm's
+# jvmcommon.sh, so the flag is appended to its memory defaults. A config var
+# that already sets the flag (or CrashOnOutOfMemoryError) wins, and
+# BUILDPACK_SCALA_EXIT_ON_OOM=false turns this off.
+mkdir -p "$BUILD_DIR/.profile.d"
+cat > "$BUILD_DIR/.profile.d/zz-buildpack-scala.sh" <<'PROFILE'
+# Added by https://github.com/jamesward/buildpack-scala
+if [ "${BUILDPACK_SCALA_EXIT_ON_OOM:-true}" != "false" ]; then
+  case " ${JAVA_TOOL_OPTIONS:-} ${JAVA_OPTS:-} " in
+    *ExitOnOutOfMemoryError*|*CrashOnOutOfMemoryError*) ;;
+    *) export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:+$JAVA_TOOL_OPTIONS }-XX:+ExitOnOutOfMemoryError" ;;
+  esac
+fi
+PROFILE
+status "Runtime: JVMs exit on OutOfMemoryError (.profile.d/zz-buildpack-scala.sh)"
+
 status "Slug root contents: $(cd "$BUILD_DIR" && ls)"
