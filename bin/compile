@@ -4,8 +4,8 @@
 #
 # Strategy:
 #   1. Point sbt/coursier/ivy caches at CACHE_DIR so deps persist between builds.
-#   2. Run `./sbt stage` to stage the app (sbt-native-packager's task).
-#   3. Run a second `./sbt 'show Universal / stagingDirectory'` and parse the
+#   2. Run `./sbta stage` (or `./sbt stage`) to stage the app (sbt-native-packager's task).
+#   3. Run a second `$SBT 'show Universal / stagingDirectory'` and parse the
 #      printed path. Two cold starts is fine — the path needs to come from
 #      sbt itself (`target/out/jvm/scala-X/proj/universal/stage` varies by
 #      Scala version and project name) and `show <key>` is core sbt and is
@@ -86,8 +86,7 @@ sbt_env_configure "$CACHE_DIR" "$TASK_CACHE_DIR"
 
 # ---- run sbt stage and capture the staging dir ------------------------------
 cd "$BUILD_DIR"
-[[ -f ./sbt ]] || fail "no ./sbt wrapper in $BUILD_DIR"
-chmod +x ./sbt
+sbt_launcher || fail "no ./sbta or ./sbt launcher in $BUILD_DIR"
 
 # Multi-project support: if SBT_PROJECT is set (typically via
 # `heroku config:set SBT_PROJECT=<id>`), scope every sbt command to that
@@ -102,8 +101,8 @@ else
   show_key="Universal / stagingDirectory"
 fi
 
-status "Running ./sbt $stage_cmd"
-./sbt "$stage_cmd"
+status "Running $SBT $stage_cmd"
+"$SBT" "$stage_cmd"
 
 # Ask sbt for the staging directory path. With sbt 2.0 we disable the
 # supershell so task output is plain, newline-terminated log lines instead of
@@ -117,14 +116,14 @@ status "Running ./sbt $stage_cmd"
 # error path and always prints the captured output for triage.
 status "Asking sbt for $show_key"
 set +e
-SBT_OUT=$(./sbt -no-colors -Dsbt.supershell=false "show $show_key" 2>&1)
+SBT_OUT=$("$SBT" -no-colors -Dsbt.supershell=false "show $show_key" 2>&1)
 SBT_RC=$?
 set -e
 if [[ $SBT_RC -ne 0 ]]; then
-  echo "----- ./sbt show output -----" >&2
+  echo "----- $SBT show output -----" >&2
   echo "$SBT_OUT" >&2
   echo "-----------------------------" >&2
-  fail "./sbt 'show $show_key' failed (exit $SBT_RC)"
+  fail "$SBT 'show $show_key' failed (exit $SBT_RC)"
 fi
 
 STAGING_DIR=$(printf '%s\n' "$SBT_OUT" | strip_ansi | grep -oE '/[^[:space:]]*/universal/stage' | tail -1 || true)
@@ -137,7 +136,7 @@ if [[ -z $STAGING_DIR || ! -d $STAGING_DIR ]]; then
 fi
 
 if [[ -z $STAGING_DIR || ! -d $STAGING_DIR ]]; then
-  echo "----- ./sbt show output -----" >&2
+  echo "----- $SBT show output -----" >&2
   echo "$SBT_OUT" >&2
   echo "-----------------------------" >&2
   fail "could not determine the staging directory for '$show_key'"
@@ -158,14 +157,14 @@ if [[ -n $SBT_PROJECT ]]; then
   base_key="$SBT_PROJECT / baseDirectory"
   status "Asking sbt for $base_key"
   set +e
-  BASE_OUT=$(./sbt -no-colors -Dsbt.supershell=false "show $base_key" 2>&1)
+  BASE_OUT=$("$SBT" -no-colors -Dsbt.supershell=false "show $base_key" 2>&1)
   BASE_RC=$?
   set -e
   if [[ $BASE_RC -ne 0 ]]; then
-    echo "----- ./sbt show output -----" >&2
+    echo "----- $SBT show output -----" >&2
     echo "$BASE_OUT" >&2
     echo "-----------------------------" >&2
-    fail "./sbt 'show $base_key' failed (exit $BASE_RC)"
+    fail "$SBT 'show $base_key' failed (exit $BASE_RC)"
   fi
   # The base dir is an absolute path on its own `[info]` line. Tolerate escapes
   # and value/[success] gluing the same way as the staging-dir lookup.
@@ -178,7 +177,7 @@ if [[ -n $SBT_PROJECT ]]; then
     PROJECT_BASE="$BUILD_DIR/$SBT_PROJECT"
   fi
   if [[ -z $PROJECT_BASE || ! -d $PROJECT_BASE ]]; then
-    echo "----- ./sbt show output -----" >&2
+    echo "----- $SBT show output -----" >&2
     echo "$BASE_OUT" >&2
     echo "-----------------------------" >&2
     fail "could not determine $base_key from sbt output"

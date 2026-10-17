@@ -39,6 +39,7 @@ jobs:
             bin/util/sbt-env.sh \
             test/smoke.sh \
             test/smoke-subproject.sh \
+            test/smoke-sbta.sh \
             test/ci-smoke.sh
 
   # ---------------------------------------------------------------------------
@@ -79,6 +80,9 @@ jobs:
 
       - name: Smoke test compile + release
         run: ./test/smoke.sh
+
+      - name: Smoke test with ./sbta as the only launcher
+        run: ./test/smoke-sbta.sh
 
       - name: Smoke test the Heroku CI testpack flow
         run: ./test/ci-smoke.sh

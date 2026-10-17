@@ -3,7 +3,7 @@
 # Usage: bin/detect <BUILD_DIR>
 #
 # Succeeds when BUILD_DIR looks like an sbt project with a project-local
-# `./sbt` wrapper (sbt-native-packager + JavaAppPackaging is then assumed).
+# `./sbta` (preferred) or `./sbt` launcher (sbt-native-packager + JavaAppPackaging is then assumed).
 set -euo pipefail
 
 BUILD_DIR=${1:-}
@@ -13,7 +13,7 @@ if [[ -z $BUILD_DIR ]]; then
   exit 1
 fi
 
-if [[ -f "$BUILD_DIR/build.sbt" && -f "$BUILD_DIR/sbt" ]]; then
+if [[ -f "$BUILD_DIR/build.sbt" && ( -f "$BUILD_DIR/sbta" || -f "$BUILD_DIR/sbt" ) ]]; then
   echo "Scala (sbt-native-packager)"
   exit 0
 fi
