@@ -15,7 +15,7 @@
 #   * Warm that in-slug cache from CACHE_DIR at the start of the run, and
 #     write it back at the end. CACHE_DIR is preserved between CI runs but
 #     is not visible from bin/test.
-#   * Run `./sbt Test/compile` so all main + test sources compile and all
+#   * Run `$SBT Test/compile` so all main + test sources compile and all
 #     deps are downloaded before the parallel test phase starts.
 set -euo pipefail
 shopt -s dotglob nullglob
@@ -69,19 +69,18 @@ sbt_env_configure "$SLUG_CACHE" "$TASK_CACHE"
 
 # ---- compile main + test sources --------------------------------------------
 cd "$BUILD_DIR"
-[[ -f ./sbt ]] || fail "no ./sbt wrapper in $BUILD_DIR"
-chmod +x ./sbt
+sbt_launcher || fail "no ./sbta or ./sbt launcher in $BUILD_DIR"
 
-status "Running ./sbt Test/compile"
-./sbt Test/compile
+status "Running $SBT Test/compile"
+"$SBT" Test/compile
 
 # ---- persist cache back to CACHE_DIR for next CI run ------------------------
 status "Persisting sbt cache to CACHE_DIR for next CI run"
 mkdir -p "$PERSIST_CACHE"
 cp -a "$SLUG_CACHE"/. "$PERSIST_CACHE"/ 2>/dev/null || true
 
-# Make sure ./sbt stays executable in the slug (cp may strip exec bit through
+# Make sure the launcher stays executable in the slug (cp may strip exec bit through
 # some filesystems).
-chmod +x "$BUILD_DIR/sbt"
+chmod +x "$BUILD_DIR/${SBT#./}"
 
 status "Test slug ready (sources + caches under $BUILD_DIR)"

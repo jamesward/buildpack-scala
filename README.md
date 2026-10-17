@@ -13,8 +13,9 @@ version-specific or project-specific hardcoded.
 
 ## Requirements
 
-- The app has a project-local `./sbt` wrapper at the repository root
-  (sbt 2.x publishes one in every new project).
+- The app has a project-local launcher at the repository root: `./sbta`
+  ([sbta](https://github.com/jamesward/sbta), sbt with an MCP server), or `./sbt`.
+  The buildpack runs `./sbta` when it's there, else `./sbt`; both take sbt's arguments.
 - The app's `build.sbt` enables `JavaAppPackaging` (which provides the
   `Universal / stage` task).
 - A JDK is on `PATH` during the build. Chain
