@@ -2,7 +2,7 @@
 // Kept deliberately tiny so CI exercises the real compile/stage path without
 // pulling a large dependency tree.
 name         := "sample-app"
-scalaVersion := "3.3.4"
+scalaVersion := "3.10.0"
 
 enablePlugins(JavaAppPackaging)
 

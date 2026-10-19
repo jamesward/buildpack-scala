@@ -17,6 +17,7 @@ Full validation (CI runs the same):
 ```bash
 shellcheck -x --severity=warning bin/detect bin/compile bin/release bin/test bin/test-compile bin/util/sbt-env.sh test/*.sh
 ./test/smoke-subproject.sh
+./test/smoke-sbta.sh
 SAMPLE_APP=$PWD/test/fixtures/sample-app ./test/smoke.sh && SAMPLE_APP=$PWD/test/fixtures/sample-app ./test/ci-smoke.sh
 ```
 
