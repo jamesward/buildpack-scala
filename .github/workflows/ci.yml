@@ -23,7 +23,7 @@ jobs:
     name: ShellCheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install ShellCheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
@@ -50,7 +50,7 @@ jobs:
     name: Smoke (SBT_PROJECT scoping)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Run subproject smoke test
         run: ./test/smoke-subproject.sh
@@ -66,10 +66,10 @@ jobs:
     env:
       SAMPLE_APP: ${{ github.workspace }}/test/fixtures/sample-app
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up JDK
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
