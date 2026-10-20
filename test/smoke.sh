@@ -70,6 +70,13 @@ echo
 echo "-----> bin/compile"
 "$buildpack/bin/compile" "$build" "$cache" "$env_dir"
 
+# The thin client's background sbt server must be gone: alive, it writes under
+# target/ and races the build dir rewrite.
+for p in $(pgrep java || true); do
+  [[ $(readlink "/proc/$p/cwd" 2>/dev/null) == "$(cd "$build" && pwd -P)" ]] \
+    && { echo "FAIL: sbt server (pid $p) still running in $build"; kill -9 "$p"; exit 1; }
+done
+
 # Assert slug layout
 echo
 echo "-----> Verifying slug layout"

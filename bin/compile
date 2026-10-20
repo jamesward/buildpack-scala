@@ -230,6 +230,11 @@ if [[ -n $PROCFILE_SRC ]]; then
   status "Using Procfile from ${PROCFILE_SRC#$BUILD_DIR/}"
 fi
 
+# The thin client leaves an sbt server running that still writes under
+# target/; stop it so it can't race the rm below (see sbt_server_stop).
+status "Stopping the sbt server"
+sbt_server_stop
+
 status "Replacing build dir with slug contents"
 cd /
 find "$BUILD_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +

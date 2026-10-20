@@ -21,6 +21,10 @@ mkdir -p "$build" "$cache" "$env_dir" "$build/project" "$fake_stage" "$fake_base
 
 # Minimal sbt "project" so bin/detect succeeds (build.sbt + ./sbt present)
 touch "$build/build.sbt"
+# Pretend the thin client left a server running, as real sbt 2 does: the
+# buildpack must shut it down before replacing the build dir.
+mkdir -p "$build/project/target"
+echo '{"uri":"local:///nonexistent/sock"}' > "$build/project/target/active.json"
 
 # The subproject ships its own Procfile in its base directory. The buildpack
 # should ship *this* one (not a repo-root one) for a multi-project build.
@@ -67,6 +71,9 @@ grep -q 'show myproj / Universal / stagingDirectory' "$log" \
 grep -q 'show myproj / baseDirectory' "$log" \
   || { echo "FAIL: did not see scoped baseDirectory query"; exit 1; }
 
+[[ $(tail -1 "$log") == shutdown ]] \
+  || { echo "FAIL: did not shut down the sbt server after the last sbt command"; exit 1; }
+
 [[ -f "$build/Procfile" ]] \
   || { echo "FAIL: no Procfile in slug"; exit 1; }
 got=$(cat "$build/Procfile")
@@ -75,3 +82,4 @@ got=$(cat "$build/Procfile")
 
 echo "OK: bin/compile invoked sbt with SBT_PROJECT=myproj scoping"
 echo "OK: bin/compile shipped the subproject's Procfile from its base directory"
+echo "OK: bin/compile shut down the sbt server before replacing the build dir"

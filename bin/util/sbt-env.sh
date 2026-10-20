@@ -8,6 +8,9 @@
 #       use <dependency-cache-root>/{coursier,ivy2,sbt}/... for dependency
 #       resolution and the sbt launcher, while sbt 2's automatic task-output
 #       cache uses <task-cache-root>.
+#   sbt_server_stop
+#       Stops the background sbt server for the current directory and waits
+#       for it to exit.
 #
 # These roots deliberately have different lifetimes. Dependency downloads are
 # safe to persist between builds. sbt 2 task outputs are not: an under-keyed
@@ -45,4 +48,37 @@ sbt_launcher() {
   else return 1
   fi
   chmod +x "$SBT"
+}
+
+# Stop the sbt server that the thin client (sbt 2's default, and ./sbta's)
+# left running in the background for the current directory, and wait for its
+# JVM to exit. The server keeps writing under target/ after each client command
+# returns (it rotates target/global-logging/ files) and again while it exits,
+# so deleting target/ while it is alive races it: `rm -rf` fails with
+# "Directory not empty". `shutdown` returns before the JVM exits, hence the
+# wait. Without a running server (no project/target/active.json) this does
+# nothing, so a launcher without a server isn't started just to stop. Call it
+# from the build directory after the last sbt command; it never fails.
+sbt_server_stop() {
+  [[ -f project/target/active.json ]] || return 0
+  local dir pid deadline
+  dir=$(pwd -P)
+  "$SBT" shutdown >/dev/null 2>&1 || true
+  deadline=$((SECONDS + 30))
+  while [[ -n $(sbt_server_pids "$dir") ]] && ((SECONDS < deadline)); do
+    sleep 0.1
+  done
+  for pid in $(sbt_server_pids "$dir"); do
+    kill -9 "$pid" 2>/dev/null || true
+  done
+  return 0
+}
+
+# sbt_server_pids <dir>: the JVMs (sbt servers) whose working directory is <dir>.
+sbt_server_pids() {
+  local p
+  for p in $(pgrep java 2>/dev/null || true); do
+    [[ $(readlink "/proc/$p/cwd" 2>/dev/null) == "$1" ]] && echo "$p"
+  done
+  return 0
 }
