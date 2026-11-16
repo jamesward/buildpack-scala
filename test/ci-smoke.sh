@@ -19,8 +19,16 @@ src=${SAMPLE_APP:-$HOME/projects/hello/hello-zio-http}
 [[ -d $src ]] || { echo "sample app not found: $src" >&2; exit 1; }
 
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
 build="$work/build"
+# bin/test-compile and bin/test leave sbt's background server running in $build;
+# it keeps writing there, so stop it before deleting (else: "Directory not empty").
+cleanup() {
+  # shellcheck source=../bin/util/sbt-env.sh
+  . "$buildpack/bin/util/sbt-env.sh"
+  if [[ -d $build ]] && cd "$build" && sbt_launcher; then sbt_server_stop; fi
+  cd / && rm -rf "$work"
+}
+trap cleanup EXIT
 cache="$work/cache"
 env_dir="$work/env"
 mkdir -p "$build" "$cache" "$env_dir"
