@@ -253,6 +253,14 @@ cp -a "$SLUG_TMP"/. "$BUILD_DIR"/
 # JVM that tries a host's IPv6 addresses first fails each connection to them
 # (NoRouteToHostException) before reaching an IPv4 one. A config var that already
 # sets preferIPv4Stack wins, and BUILDPACK_SCALA_PREFER_IPV4=false turns this off.
+#
+# Cap glibc malloc arenas (MALLOC_ARENA_MAX=2). glibc gives each thread that
+# mallocs concurrently its own arena, up to 8 per CPU, and a dyno shows the
+# host's CPUs (8 on a Standard-2X), so native memory from many JVM threads
+# (zip inflaters, netty, JNI/FFM libraries) fragments across dozens of arenas
+# and RSS keeps growing outside the JVM's limits. On javadocs (a 1 GB dyno),
+# R14 went from most hours of the day to one episode in the week after it was
+# set. A MALLOC_ARENA_MAX config var wins.
 mkdir -p "$BUILD_DIR/.profile.d"
 cat > "$BUILD_DIR/.profile.d/zz-buildpack-scala.sh" <<'PROFILE'
 # Added by https://github.com/jamesward/buildpack-scala
@@ -268,7 +276,8 @@ if [ "${BUILDPACK_SCALA_PREFER_IPV4:-true}" != "false" ]; then
     *) export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:+$JAVA_TOOL_OPTIONS }-Djava.net.preferIPv4Stack=true" ;;
   esac
 fi
+export MALLOC_ARENA_MAX="${MALLOC_ARENA_MAX:-2}"
 PROFILE
-status "Runtime: JVMs exit on OutOfMemoryError and prefer IPv4 (.profile.d/zz-buildpack-scala.sh)"
+status "Runtime: JVMs exit on OutOfMemoryError and prefer IPv4, MALLOC_ARENA_MAX=2 by default (.profile.d/zz-buildpack-scala.sh)"
 
 status "Slug root contents: $(cd "$BUILD_DIR" && ls)"

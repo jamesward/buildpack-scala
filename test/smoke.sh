@@ -134,12 +134,20 @@ check_profile "$ipv4" "JAVA_OPTS=-XX:+ExitOnOutOfMemoryError"
 check_profile "$ipv4" "BUILDPACK_SCALA_EXIT_ON_OOM=false"
 check_profile "-Djava.net.preferIPv4Stack=false -XX:+ExitOnOutOfMemoryError" "JAVA_TOOL_OPTIONS=-Djava.net.preferIPv4Stack=false"
 check_profile "-XX:+ExitOnOutOfMemoryError" "BUILDPACK_SCALA_PREFER_IPV4=false"
+check_arenas() { # <expected MALLOC_ARENA_MAX> [VAR=value ...]
+  local want=$1; shift
+  local got
+  got=$(env -i "$@" bash -c '. "$1"; printf %s "${MALLOC_ARENA_MAX:-}"' _ "$prof")
+  [[ $got == "$want" ]] || { echo "FAIL: profile with [$*] gave MALLOC_ARENA_MAX='$got', want '$want'"; exit 1; }
+}
+check_arenas 2
+check_arenas 4 "MALLOC_ARENA_MAX=4"
 if command -v java >/dev/null; then
   flag=$(env JAVA_TOOL_OPTIONS="$(env -i bash -c '. "$1"; printf %s "$JAVA_TOOL_OPTIONS"' _ "$prof")" \
     java -XX:+PrintFlagsFinal -version 2>/dev/null | awk '$2 == "ExitOnOutOfMemoryError" {print $4}')
   [[ $flag == true ]] || { echo "FAIL: java didn't pick up ExitOnOutOfMemoryError (got '$flag')"; exit 1; }
 fi
-echo "       .profile.d/zz-buildpack-scala.sh adds -XX:+ExitOnOutOfMemoryError and $ipv4"
+echo "       .profile.d/zz-buildpack-scala.sh adds -XX:+ExitOnOutOfMemoryError and $ipv4, and defaults MALLOC_ARENA_MAX=2"
 
 # bin/release
 echo

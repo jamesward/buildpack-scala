@@ -70,28 +70,33 @@ Without preserving `.jdk/` the dyno would start with no Java on `PATH`, since
 heroku/jvm's `.profile.d/jdk.sh` exports `PATH=$HOME/.jdk/bin:$PATH` and
 `$HOME/.jdk` would no longer exist.
 
+The set of preserved names lives in the `PRESERVE` array in `bin/compile`.
+Add to it if you chain another buildpack that contributes additional
+slug-side directories.
+
 ## Runtime Java memory settings
 
 The required `heroku/jvm` buildpack owns runtime JVM memory configuration. It
 installs `.profile.d/jvmcommon.sh`, which Heroku sources when each dyno starts,
 after config vars are available. The script reads the dyno's cgroup memory
-limit and adds the corresponding defaults to `JAVA_TOOL_OPTIONS`, so resizing
-a dyno updates its JVM settings on restart without rebuilding the slug.
+limit and puts the corresponding defaults at the front of `JAVA_OPTS`, which
+sbt-native-packager's start script passes to `java`. Resizing a dyno updates
+its JVM settings on restart without rebuilding the slug.
 
-For example, on a 512 MiB Basic dyno the current defaults include:
-
-```
--XX:MaxRAM=536870912 -Xmx300m -Xss512k -XX:CICompilerCount=2
-```
+For example, the current defaults are `-XX:MaxRAM=536870912 -Xmx300m -Xss512k
+-XX:CICompilerCount=2` on a 512 MiB Basic dyno, and `-XX:MaxRAM=1073741824
+-Xmx671m -XX:CICompilerCount=2` on a 1 GiB Standard-2X.
 
 This buildpack deliberately does not install a second memory calculator. To
-override Heroku's defaults, set `JAVA_TOOL_OPTIONS`; custom options are placed
-after the defaults and therefore take precedence when the same JVM setting is
-specified more than once:
+override Heroku's defaults, set the `JAVA_OPTS` config var: the script appends
+it after the defaults, and the last occurrence of a JVM flag wins:
 
 ```sh
-heroku config:set JAVA_TOOL_OPTIONS='-Xmx384m -Xss512k'
+heroku config:set JAVA_OPTS='-Xmx400m'
 ```
+
+Don't put memory flags in `JAVA_TOOL_OPTIONS`. The JVM reads it before the
+command line, so the `-Xmx` from `JAVA_OPTS` overrides it.
 
 JVM flags placed directly in a `Procfile` command have the highest precedence.
 
@@ -113,9 +118,14 @@ addresses can try the IPv6 ones first, and each of those connections fails with
 or `JAVA_OPTS` already mention `preferIPv4Stack`; set `BUILDPACK_SCALA_PREFER_IPV4=false`
 to turn it off.
 
-The set of preserved names lives in the `PRESERVE` array in `bin/compile`.
-Add to it if you chain another buildpack that contributes additional
-slug-side directories.
+### glibc malloc arenas
+
+The buildpack also exports `MALLOC_ARENA_MAX=2` unless it's already set (a
+config var wins). glibc gives each thread that mallocs concurrently its own
+arena, up to 8 per CPU, and a dyno shows the host's CPUs, so native memory from
+many JVM threads (zip inflaters, netty, JNI/FFM libraries) fragments across
+dozens of arenas and RSS grows past what the JVM's own limits account for. Set
+`MALLOC_ARENA_MAX` to a larger number to allow more arenas.
 
 ## Procfile
 

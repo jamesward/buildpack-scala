@@ -1,6 +1,6 @@
 # AGENTS.md: buildpack-scala
 
-Classic Heroku buildpack (bash) for Scala apps built with sbt 2 and sbt-native-packager's `JavaAppPackaging`: runs `./sbt stage` and ships `universal/stage` as the slug, chained after `heroku/jvm`. Used in production by every factory Scala server on Heroku (javadocs, webjars, webjars-file-service, the mytoolbook apps, skillsjars, jev-llm-c4, json-paste, hello-zio-http). It also adds `-XX:+ExitOnOutOfMemoryError` and `-Djava.net.preferIPv4Stack=true` to `JAVA_TOOL_OPTIONS` (see README).
+Classic Heroku buildpack (bash) for Scala apps built with sbt 2 and sbt-native-packager's `JavaAppPackaging`: runs `./sbt stage` and ships `universal/stage` as the slug, chained after `heroku/jvm`. Used in production by every factory Scala server on Heroku (javadocs, webjars, webjars-file-service, the mytoolbook apps, skillsjars, jev-llm-c4, json-paste, hello-zio-http). It also adds `-XX:+ExitOnOutOfMemoryError` and `-Djava.net.preferIPv4Stack=true` to `JAVA_TOOL_OPTIONS`, and defaults `MALLOC_ARENA_MAX=2` (see README).
 
 ## Skills
 
