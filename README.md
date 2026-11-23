@@ -104,6 +104,15 @@ process that can't allocate. It's skipped when `JAVA_TOOL_OPTIONS` or `JAVA_OPTS
 already mention `ExitOnOutOfMemoryError` or `CrashOnOutOfMemoryError`; set
 `BUILDPACK_SCALA_EXIT_ON_OOM=false` to turn it off.
 
+### Prefer IPv4
+
+Dynos have no IPv6 route, so the buildpack also adds `-Djava.net.preferIPv4Stack=true` to
+`JAVA_TOOL_OPTIONS`. Without it, a JVM connecting to a host with both IPv4 and IPv6
+addresses can try the IPv6 ones first, and each of those connections fails with
+`NoRouteToHostException` before an IPv4 one is tried. It's skipped when `JAVA_TOOL_OPTIONS`
+or `JAVA_OPTS` already mention `preferIPv4Stack`; set `BUILDPACK_SCALA_PREFER_IPV4=false`
+to turn it off.
+
 The set of preserved names lives in the `PRESERVE` array in `bin/compile`.
 Add to it if you chain another buildpack that contributes additional
 slug-side directories.
