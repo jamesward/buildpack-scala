@@ -117,7 +117,7 @@ fi
 echo "       .jdk/ preserved (size: $(du -sh "$build/.jdk" | cut -f1))"
 echo "       .profile.d/jdk.sh preserved"
 
-# Runtime JVM defaults: ExitOnOutOfMemoryError appended after heroku/jvm's options
+# Runtime JVM defaults: ExitOnOutOfMemoryError and preferIPv4Stack appended after heroku/jvm's options
 prof=$build/.profile.d/zz-buildpack-scala.sh
 [[ -f $prof ]] || { echo "FAIL: $prof missing"; exit 1; }
 check_profile() { # <expected JAVA_TOOL_OPTIONS> [VAR=value ...]
@@ -126,17 +126,20 @@ check_profile() { # <expected JAVA_TOOL_OPTIONS> [VAR=value ...]
   got=$(env -i "$@" bash -c '. "$1"; printf %s "${JAVA_TOOL_OPTIONS:-}"' _ "$prof")
   [[ $got == "$want" ]] || { echo "FAIL: profile with [$*] gave JAVA_TOOL_OPTIONS='$got', want '$want'"; exit 1; }
 }
-check_profile "-XX:+ExitOnOutOfMemoryError"
-check_profile "-Xmx300m -Xss512k -XX:+ExitOnOutOfMemoryError" "JAVA_TOOL_OPTIONS=-Xmx300m -Xss512k"
-check_profile "-XX:+CrashOnOutOfMemoryError" "JAVA_TOOL_OPTIONS=-XX:+CrashOnOutOfMemoryError"
-check_profile "" "JAVA_OPTS=-XX:+ExitOnOutOfMemoryError"
-check_profile "" "BUILDPACK_SCALA_EXIT_ON_OOM=false"
+ipv4="-Djava.net.preferIPv4Stack=true"
+check_profile "-XX:+ExitOnOutOfMemoryError $ipv4"
+check_profile "-Xmx300m -Xss512k -XX:+ExitOnOutOfMemoryError $ipv4" "JAVA_TOOL_OPTIONS=-Xmx300m -Xss512k"
+check_profile "-XX:+CrashOnOutOfMemoryError $ipv4" "JAVA_TOOL_OPTIONS=-XX:+CrashOnOutOfMemoryError"
+check_profile "$ipv4" "JAVA_OPTS=-XX:+ExitOnOutOfMemoryError"
+check_profile "$ipv4" "BUILDPACK_SCALA_EXIT_ON_OOM=false"
+check_profile "-Djava.net.preferIPv4Stack=false -XX:+ExitOnOutOfMemoryError" "JAVA_TOOL_OPTIONS=-Djava.net.preferIPv4Stack=false"
+check_profile "-XX:+ExitOnOutOfMemoryError" "BUILDPACK_SCALA_PREFER_IPV4=false"
 if command -v java >/dev/null; then
   flag=$(env JAVA_TOOL_OPTIONS="$(env -i bash -c '. "$1"; printf %s "$JAVA_TOOL_OPTIONS"' _ "$prof")" \
     java -XX:+PrintFlagsFinal -version 2>/dev/null | awk '$2 == "ExitOnOutOfMemoryError" {print $4}')
   [[ $flag == true ]] || { echo "FAIL: java didn't pick up ExitOnOutOfMemoryError (got '$flag')"; exit 1; }
 fi
-echo "       .profile.d/zz-buildpack-scala.sh adds -XX:+ExitOnOutOfMemoryError"
+echo "       .profile.d/zz-buildpack-scala.sh adds -XX:+ExitOnOutOfMemoryError and $ipv4"
 
 # bin/release
 echo

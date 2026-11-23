@@ -248,6 +248,11 @@ cp -a "$SLUG_TMP"/. "$BUILD_DIR"/
 # jvmcommon.sh, so the flag is appended to its memory defaults. A config var
 # that already sets the flag (or CrashOnOutOfMemoryError) wins, and
 # BUILDPACK_SCALA_EXIT_ON_OOM=false turns this off.
+#
+# Prefer IPv4 (-Djava.net.preferIPv4Stack=true): dynos have no IPv6 route, so a
+# JVM that tries a host's IPv6 addresses first fails each connection to them
+# (NoRouteToHostException) before reaching an IPv4 one. A config var that already
+# sets preferIPv4Stack wins, and BUILDPACK_SCALA_PREFER_IPV4=false turns this off.
 mkdir -p "$BUILD_DIR/.profile.d"
 cat > "$BUILD_DIR/.profile.d/zz-buildpack-scala.sh" <<'PROFILE'
 # Added by https://github.com/jamesward/buildpack-scala
@@ -257,7 +262,13 @@ if [ "${BUILDPACK_SCALA_EXIT_ON_OOM:-true}" != "false" ]; then
     *) export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:+$JAVA_TOOL_OPTIONS }-XX:+ExitOnOutOfMemoryError" ;;
   esac
 fi
+if [ "${BUILDPACK_SCALA_PREFER_IPV4:-true}" != "false" ]; then
+  case " ${JAVA_TOOL_OPTIONS:-} ${JAVA_OPTS:-} " in
+    *preferIPv4Stack*) ;;
+    *) export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:+$JAVA_TOOL_OPTIONS }-Djava.net.preferIPv4Stack=true" ;;
+  esac
+fi
 PROFILE
-status "Runtime: JVMs exit on OutOfMemoryError (.profile.d/zz-buildpack-scala.sh)"
+status "Runtime: JVMs exit on OutOfMemoryError and prefer IPv4 (.profile.d/zz-buildpack-scala.sh)"
 
 status "Slug root contents: $(cd "$BUILD_DIR" && ls)"
