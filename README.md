@@ -135,6 +135,11 @@ it after the defaults, and the last occurrence of a JVM flag wins:
 heroku config:set JAVA_OPTS='-Xmx400m'
 ```
 
+The `JAVA_OPTS` config var applies at runtime only: the buildpack doesn't
+export it to the build, so it can't shrink sbt's heap (a runtime `-Xmx400m`
+once ran a build out of memory). Set build JVM options in `SBT_OPTS` or the
+app's `.sbtopts` (e.g. `-J-Xmx2g`).
+
 Don't put memory flags in `JAVA_TOOL_OPTIONS`. The JVM reads it before the
 command line, so the `-Xmx` from `JAVA_OPTS` overrides it.
 

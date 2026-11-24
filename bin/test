@@ -28,7 +28,11 @@ if [[ -n $ENV_DIR && -d $ENV_DIR ]]; then
     [[ -f $f ]] || continue
     name=$(basename "$f")
     case "$name" in
-      PATH|GIT_DIR|LD_*|JAVA_TOOL_OPTIONS) continue ;;
+      # JAVA_OPTS is the app's runtime JVM options (heroku/jvm's memory defaults
+      # plus overrides like -Xmx400m). sbt reads it too, so exporting it would
+      # size the build's JVM for the dyno's runtime heap and can run sbt out of
+      # memory. Build JVM options go in SBT_OPTS or the app's .sbtopts.
+      PATH|GIT_DIR|LD_*|JAVA_TOOL_OPTIONS|JAVA_OPTS) continue ;;
     esac
     export "$name=$(cat "$f")"
   done
