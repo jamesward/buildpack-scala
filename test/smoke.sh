@@ -24,6 +24,10 @@ cache="$work/cache"
 env_dir="$work/env"
 mkdir -p "$build" "$cache" "$env_dir"
 
+# A runtime JAVA_OPTS config var must not reach the build's sbt: -Xmx16m would
+# make it fail to start, so the build below only succeeds if it's skipped.
+printf '%s' "-Xmx16m" > "$env_dir/JAVA_OPTS"
+
 # Optional: pass SBT_PROJECT through to bin/compile via the ENV_DIR mechanism
 # (Heroku passes config vars this way: one file per name, content is value).
 if [[ -n ${SBT_PROJECT:-} ]]; then
