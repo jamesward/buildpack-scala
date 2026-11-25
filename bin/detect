@@ -15,7 +15,11 @@ if [[ -z $BUILD_DIR ]]; then
 fi
 
 if [[ -f "$BUILD_DIR/build.sbt" && ( -f "$BUILD_DIR/sbta" || -f "$BUILD_DIR/sbt" ) ]]; then
-  echo "Scala (sbt-native-packager)"
+  if grep -qs 'sbt-native-image' "$BUILD_DIR"/project/*.sbt; then
+    echo "Scala (sbt-native-image)"
+  else
+    echo "Scala (sbt-native-packager)"
+  fi
   exit 0
 fi
 
