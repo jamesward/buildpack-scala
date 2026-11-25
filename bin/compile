@@ -21,6 +21,14 @@
 #
 # Result: the slug root *is* the staged universal directory. Procfile entries
 # must therefore be relative to the staging root (e.g. `web: bin/<exec>`).
+#
+# Native image mode: when the build uses sbt-native-image (an
+# `addSbtPlugin(... "sbt-native-image" ...)` in project/*.sbt), or the
+# BUILDPACK_SCALA_NATIVE_IMAGE config var is `true`, the buildpack runs
+# `nativeImage` instead of `stage` and the slug is only the GraalVM native
+# binary at bin/<name>, the Procfile and .profile.d/zz-buildpack-scala.sh: no
+# JDK (heroku/jvm's .jdk/ is dropped; it's only needed to run sbt). Set
+# BUILDPACK_SCALA_NATIVE_IMAGE=false to stage with sbt-native-packager anyway.
 
 set -euo pipefail
 shopt -s dotglob nullglob
@@ -92,41 +100,76 @@ sbt_launcher || fail "no ./sbta or ./sbt launcher in $BUILD_DIR"
 # `heroku config:set SBT_PROJECT=<id>`), scope every sbt command to that
 # subproject. When unset, sbt uses the current (root) project.
 SBT_PROJECT=${SBT_PROJECT:-}
-if [[ -n $SBT_PROJECT ]]; then
-  stage_cmd="$SBT_PROJECT/stage"
-  show_key="$SBT_PROJECT / Universal / stagingDirectory"
-  status "Targeting subproject: $SBT_PROJECT"
+scope=${SBT_PROJECT:+$SBT_PROJECT/}
+key_scope=${SBT_PROJECT:+$SBT_PROJECT / }
+[[ -n $SBT_PROJECT ]] && status "Targeting subproject: $SBT_PROJECT"
+
+case "${BUILDPACK_SCALA_NATIVE_IMAGE:-}" in
+  true)  NATIVE=true ;;
+  false) NATIVE=false ;;
+  "")    if grep -qs 'sbt-native-image' project/*.sbt; then NATIVE=true; else NATIVE=false; fi ;;
+  *)     fail "BUILDPACK_SCALA_NATIVE_IMAGE must be true or false, not '$BUILDPACK_SCALA_NATIVE_IMAGE'" ;;
+esac
+
+# show_value <key> <grep -E pattern>: sets SHOW_VALUE to the last match of the
+# pattern in `$SBT show <key>`'s output (empty if none), and SHOW_OUT to that
+# output. Call it directly, not in $(...), so both reach the caller. Fails the build (printing
+# the output) when sbt fails. With sbt 2.0 we disable the supershell so task
+# output is plain, newline-terminated log lines instead of cursor-addressed
+# redraws, and still defensively strip residual escapes: sbt 2.0's supershell
+# can glue the value to the next `[success]` line, so the path is pulled out
+# of the line rather than requiring a pristine `[info] <path>` line.
+show_value() {
+  local key=$1 pattern=$2 out rc
+  status "Asking sbt for $key"
+  set +e
+  out=$("$SBT" -no-colors -Dsbt.supershell=false "show $key" 2>&1)
+  rc=$?
+  set -e
+  if [[ $rc -ne 0 ]]; then
+    echo "----- $SBT show output -----" >&2
+    echo "$out" >&2
+    echo "-----------------------------" >&2
+    fail "$SBT 'show $key' failed (exit $rc)"
+  fi
+  SHOW_OUT=$out
+  SHOW_VALUE=$(printf '%s\n' "$out" | strip_ansi | grep -oE "$pattern" | tail -1 || true)
+}
+
+if [[ $NATIVE == true ]]; then
+  # sbt-native-image downloads GraalVM through Coursier: the archive goes to
+  # COURSIER_CACHE (the persistent dependency cache), and Coursier extracts it
+  # under COURSIER_JVM_CACHE. Extracting is quick, and keeping the extracted
+  # copy too would double the ~350 MB the build cache holds for it, so it's
+  # build-scoped.
+  JVM_CACHE_DIR=$(mktemp -d)
+  CLEANUP_PATHS+=("$JVM_CACHE_DIR")
+  export COURSIER_JVM_CACHE="$JVM_CACHE_DIR"
+
+  status "Native image: running $SBT ${scope}nativeImage"
+  NATIVE_LOG=$(mktemp)
+  CLEANUP_PATHS+=("$NATIVE_LOG")
+  "$SBT" -Dsbt.supershell=false "${scope}nativeImage" 2>&1 | tee "$NATIVE_LOG"
+  # sbt-native-image logs the binary's absolute path after "Native image
+  # ready!". (`show nativeImageOutput` isn't usable: sbt 2 prints File
+  # settings as virtual `${OUT}/...` paths.)
+  NATIVE_BIN=$(strip_ansi < "$NATIVE_LOG" | grep -oE '/[^[:space:]]*/native-image/[^[:space:]/[]+' | tail -1 || true)
+  # Filesystem fallback, as for the staging directory: the binary is the
+  # executable file in a native-image/ output directory.
+  if [[ -z $NATIVE_BIN || ! -f $NATIVE_BIN || ! -x $NATIVE_BIN ]]; then
+    NATIVE_BIN=$(find "$BUILD_DIR/target" -type f -perm -u+x -path "*${SBT_PROJECT:+/$SBT_PROJECT}/native-image/*" 2>/dev/null | sort | tail -1 || true)
+  fi
+  [[ -n $NATIVE_BIN && -f $NATIVE_BIN && -x $NATIVE_BIN ]] \
+    || fail "could not find the native binary that ${scope}nativeImage built"
+  status "Native binary: ${NATIVE_BIN#$BUILD_DIR/} ($(du -h "$NATIVE_BIN" | cut -f1))"
 else
-  stage_cmd="stage"
-  show_key="Universal / stagingDirectory"
-fi
+status "Running $SBT ${scope}stage"
+"$SBT" "${scope}stage"
 
-status "Running $SBT $stage_cmd"
-"$SBT" "$stage_cmd"
-
-# Ask sbt for the staging directory path. With sbt 2.0 we disable the
-# supershell so task output is plain, newline-terminated log lines instead of
-# cursor-addressed redraws. We still defensively strip any residual escapes.
-#
-# Extraction is deliberately tolerant: rather than requiring a pristine
-# `[info] <path>` line (which sbt 2.0's supershell can mangle by gluing the
-# value to the next `[success]` line), we pull the first absolute path that
-# ends in `universal/stage`. A non-match yields an empty string (never a
-# pipeline failure), so the explicit check below — not `set -e` — owns the
-# error path and always prints the captured output for triage.
-status "Asking sbt for $show_key"
-set +e
-SBT_OUT=$("$SBT" -no-colors -Dsbt.supershell=false "show $show_key" 2>&1)
-SBT_RC=$?
-set -e
-if [[ $SBT_RC -ne 0 ]]; then
-  echo "----- $SBT show output -----" >&2
-  echo "$SBT_OUT" >&2
-  echo "-----------------------------" >&2
-  fail "$SBT 'show $show_key' failed (exit $SBT_RC)"
-fi
-
-STAGING_DIR=$(printf '%s\n' "$SBT_OUT" | strip_ansi | grep -oE '/[^[:space:]]*/universal/stage' | tail -1 || true)
+show_key="${key_scope}Universal / stagingDirectory"
+show_value "$show_key" '/[^[:space:]]*/universal/stage'
+STAGING_DIR=$SHOW_VALUE
+SBT_OUT=$SHOW_OUT
 
 # Filesystem fallback: after `<proj>/stage` runs, the directory exists on disk
 # regardless of how sbt logged its path. This makes the buildpack resilient to
@@ -143,6 +186,7 @@ if [[ -z $STAGING_DIR || ! -d $STAGING_DIR ]]; then
 fi
 
 status "Staging directory: ${STAGING_DIR#$BUILD_DIR/}"
+fi
 
 # ---- locate the Procfile that applies to this slug --------------------------
 # The slug root *is* the staging dir. For a multi-project build that staging
@@ -155,17 +199,8 @@ status "Staging directory: ${STAGING_DIR#$BUILD_DIR/}"
 PROJECT_BASE=""
 if [[ -n $SBT_PROJECT ]]; then
   base_key="$SBT_PROJECT / baseDirectory"
-  status "Asking sbt for $base_key"
-  set +e
-  BASE_OUT=$("$SBT" -no-colors -Dsbt.supershell=false "show $base_key" 2>&1)
-  BASE_RC=$?
-  set -e
-  if [[ $BASE_RC -ne 0 ]]; then
-    echo "----- $SBT show output -----" >&2
-    echo "$BASE_OUT" >&2
-    echo "-----------------------------" >&2
-    fail "$SBT 'show $base_key' failed (exit $BASE_RC)"
-  fi
+  show_value "$base_key" '/[^[:space:]]+'
+  BASE_OUT=$SHOW_OUT
   # The base dir is an absolute path on its own `[info]` line. Tolerate escapes
   # and value/[success] gluing the same way as the staging-dir lookup.
   PROJECT_BASE=$(printf '%s\n' "$BASE_OUT" | strip_ansi \
@@ -204,17 +239,25 @@ fi
 SLUG_TMP=$(mktemp -d)
 CLEANUP_PATHS+=("$SLUG_TMP")
 
-cp -a "$STAGING_DIR"/. "$SLUG_TMP"/
-
 # Names at $BUILD_DIR root that should survive the rewrite. Add to this list
 # if you chain another buildpack that contributes a slug-side directory.
 # NOTE: the Procfile is handled separately below — its source location depends
 # on whether this is a multi-project build (see PROCFILE_SRC above).
-PRESERVE=(
-  .profile.d   # PATH/env scripts contributed by buildpacks (e.g. heroku/jvm)
-  .jdk         # JDK installed by heroku/jvm
-  .heroku      # generic Heroku slug-side metadata
-)
+if [[ $NATIVE == true ]]; then
+  # Only the binary: heroku/jvm's JDK and its .profile.d scripts were for sbt.
+  mkdir -p "$SLUG_TMP/bin"
+  cp -a "$NATIVE_BIN" "$SLUG_TMP/bin/"
+  PRESERVE=(
+    .heroku    # generic Heroku slug-side metadata
+  )
+else
+  cp -a "$STAGING_DIR"/. "$SLUG_TMP"/
+  PRESERVE=(
+    .profile.d   # PATH/env scripts contributed by buildpacks (e.g. heroku/jvm)
+    .jdk         # JDK installed by heroku/jvm
+    .heroku      # generic Heroku slug-side metadata
+  )
+fi
 
 for name in "${PRESERVE[@]}"; do
   [[ -e "$BUILD_DIR/$name" ]] || continue
@@ -261,7 +304,18 @@ cp -a "$SLUG_TMP"/. "$BUILD_DIR"/
 # and RSS keeps growing outside the JVM's limits. On javadocs (a 1 GB dyno),
 # R14 went from most hours of the day to one episode in the week after it was
 # set. A MALLOC_ARENA_MAX config var wins.
+#
+# A native binary ignores JAVA_TOOL_OPTIONS (its runtime options are
+# command-line arguments, or build-time defaults set with `-R:` in
+# nativeImageOptions), so in native image mode only MALLOC_ARENA_MAX applies.
 mkdir -p "$BUILD_DIR/.profile.d"
+if [[ $NATIVE == true ]]; then
+cat > "$BUILD_DIR/.profile.d/zz-buildpack-scala.sh" <<'PROFILE'
+# Added by https://github.com/jamesward/buildpack-scala
+export MALLOC_ARENA_MAX="${MALLOC_ARENA_MAX:-2}"
+PROFILE
+status "Runtime: MALLOC_ARENA_MAX=2 by default (.profile.d/zz-buildpack-scala.sh)"
+else
 cat > "$BUILD_DIR/.profile.d/zz-buildpack-scala.sh" <<'PROFILE'
 # Added by https://github.com/jamesward/buildpack-scala
 if [ "${BUILDPACK_SCALA_EXIT_ON_OOM:-true}" != "false" ]; then
@@ -279,5 +333,6 @@ fi
 export MALLOC_ARENA_MAX="${MALLOC_ARENA_MAX:-2}"
 PROFILE
 status "Runtime: JVMs exit on OutOfMemoryError and prefer IPv4, MALLOC_ARENA_MAX=2 by default (.profile.d/zz-buildpack-scala.sh)"
+fi
 
 status "Slug root contents: $(cd "$BUILD_DIR" && ls)"

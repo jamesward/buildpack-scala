@@ -11,6 +11,9 @@ into the slug. The exact path under
 sbt** (via `./sbt 'show Universal / stagingDirectory'`) — there is nothing
 version-specific or project-specific hardcoded.
 
+Apps built with [sbt-native-image](https://github.com/scalameta/sbt-native-image)
+get a GraalVM native binary instead; see [Native image mode](#native-image-mode).
+
 ## Requirements
 
 - The app has a project-local launcher at the repository root: `./sbta`
@@ -73,6 +76,43 @@ heroku/jvm's `.profile.d/jdk.sh` exports `PATH=$HOME/.jdk/bin:$PATH` and
 The set of preserved names lives in the `PRESERVE` array in `bin/compile`.
 Add to it if you chain another buildpack that contributes additional
 slug-side directories.
+
+## Native image mode
+
+When `project/*.sbt` adds the `sbt-native-image` plugin, the buildpack runs
+`./sbt nativeImage` (`./sbt <SBT_PROJECT>/nativeImage` for a multi-project
+build) instead of `stage`, and the slug is only the native binary:
+
+```
+.            <-- slug root
+├── bin/
+│   └── <name>               # the GraalVM native binary (nativeImageOutput)
+├── .profile.d/
+│   └── zz-buildpack-scala.sh  # MALLOC_ARENA_MAX=2 by default
+└── Procfile                 # e.g. `web: bin/<name>`
+```
+
+heroku/jvm still has to run first, since sbt needs a JDK, but its `.jdk/` and
+`.profile.d` scripts are left out of the slug. Set the config var
+`BUILDPACK_SCALA_NATIVE_IMAGE=true` to use native image mode without the plugin
+line being detected, or `false` to stage with sbt-native-packager anyway.
+
+- **GraalVM** is downloaded by sbt-native-image through Coursier. The archive
+  is kept in the build cache (`CACHE_DIR/coursier/v1`); it's extracted again on
+  each build, into a build-scoped directory (`COURSIER_JVM_CACHE`).
+- **Linking** needs gcc and zlib, which Heroku's build images have
+  (`build-essential`, `zlib1g-dev`).
+- **Build memory:** native-image sizes itself to the build container (85% of
+  its memory, all its CPUs). A small ZIO HTTP server needed about 3.5 GB: with
+  a 2 GB limit it ran out of heap.
+- **Runtime options:** a native binary doesn't read `JAVA_TOOL_OPTIONS`, so the
+  JVM defaults below (`-XX:+ExitOnOutOfMemoryError`,
+  `-Djava.net.preferIPv4Stack=true`) don't apply. Pass them as arguments in the
+  `Procfile`, or give them build-time defaults with `-R:` options in
+  `nativeImageOptions` (for example `-R:+ExitOnOutOfMemoryError`). The binary's
+  default max heap is 80% of the dyno's memory limit.
+- **CPU features:** native-image targets `x86-64-v3` (AVX2) by default. To be
+  sure the binary runs on every dyno, build with `-march=compatibility`.
 
 ## Runtime Java memory settings
 
@@ -310,6 +350,12 @@ SAMPLE_APP=./test/fixtures/sample-app ./test/ci-smoke.sh
 - **Smoke (end-to-end)** stages and tests the `test/fixtures/sample-app`
   sbt-native-packager app through `bin/compile`/`bin/release` and the Heroku CI
   testpack flow (`bin/test-compile`/`bin/test`).
+- **Smoke (native image)** runs `test/smoke-native.sh`: the
+  `test/fixtures/native-app` sbt-native-image app through
+  `bin/detect`/`bin/compile`/`bin/release`, checking that the slug is only the
+  binary, the `Procfile` and `.profile.d/zz-buildpack-scala.sh`, and that the
+  binary runs. Where the linker can't find zlib (NixOS), pass a linker path:
+  `EXTRA_SBT_SETTINGS='nativeImageOptions += "-H:NativeLinkerOption=-L<zlib lib dir>"' ./test/smoke-native.sh`.
 
 ## Layout
 
@@ -328,8 +374,10 @@ buildpack-scala/
 │   ├── smoke.sh             # local end-to-end test of compile/release
 │   ├── smoke-subproject.sh  # verifies SBT_PROJECT scoping (uses a stub sbt)
 │   ├── ci-smoke.sh          # local end-to-end test of test-compile/test
+│   ├── smoke-native.sh      # native image mode end to end
 │   └── fixtures/
-│       └── sample-app/      # tiny sbt-native-packager app the smoke tests use
+│       ├── sample-app/      # tiny sbt-native-packager app the smoke tests use
+│       └── native-app/      # tiny sbt-native-image app for smoke-native.sh
 └── .github/
     └── workflows/
         └── ci.yml           # ShellCheck + smoke tests on push / PR

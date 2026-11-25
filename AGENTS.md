@@ -1,6 +1,6 @@
 # AGENTS.md: buildpack-scala
 
-Classic Heroku buildpack (bash) for Scala apps built with sbt 2 and sbt-native-packager's `JavaAppPackaging`: runs `./sbt stage` and ships `universal/stage` as the slug, chained after `heroku/jvm`. Used in production by every factory Scala server on Heroku (javadocs, webjars, webjars-file-service, the mytoolbook apps, skillsjars, jev-llm-c4, json-paste, hello-zio-http). It also adds `-XX:+ExitOnOutOfMemoryError` and `-Djava.net.preferIPv4Stack=true` to `JAVA_TOOL_OPTIONS`, and defaults `MALLOC_ARENA_MAX=2` (see README).
+Classic Heroku buildpack (bash) for Scala apps built with sbt 2 and sbt-native-packager's `JavaAppPackaging`: runs `./sbt stage` and ships `universal/stage` as the slug, chained after `heroku/jvm`. Apps using sbt-native-image instead get native image mode: `nativeImage`, and a slug with only the binary at `bin/<name>` (used by mcp-jamesward). Used in production by every factory Scala server on Heroku (javadocs, webjars, webjars-file-service, the mytoolbook apps, skillsjars, jev-llm-c4, json-paste, hello-zio-http). It also adds `-XX:+ExitOnOutOfMemoryError` and `-Djava.net.preferIPv4Stack=true` to `JAVA_TOOL_OPTIONS`, and defaults `MALLOC_ARENA_MAX=2` (see README).
 
 ## Skills
 
@@ -19,7 +19,10 @@ shellcheck -x --severity=warning bin/detect bin/compile bin/release bin/test bin
 ./test/smoke-subproject.sh
 ./test/smoke-sbta.sh
 SAMPLE_APP=$PWD/test/fixtures/sample-app ./test/smoke.sh && SAMPLE_APP=$PWD/test/fixtures/sample-app ./test/ci-smoke.sh
+./test/smoke-native.sh
 ```
+
+`smoke-native.sh` builds a GraalVM native image (about a minute; needs gcc, zlib and network for GraalVM). On NixOS pass the zlib path with `EXTRA_SBT_SETTINGS` (see README).
 
 The end-to-end smoke tests need a JDK and sbt on `PATH` (the fixture's `./sbt` calls the system `sbt`).
 

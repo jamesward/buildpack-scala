@@ -40,6 +40,7 @@ jobs:
             test/smoke.sh \
             test/smoke-subproject.sh \
             test/smoke-sbta.sh \
+            test/smoke-native.sh \
             test/ci-smoke.sh
 
   # ---------------------------------------------------------------------------
@@ -86,3 +87,22 @@ jobs:
 
       - name: Smoke test the Heroku CI testpack flow
         run: ./test/ci-smoke.sh
+
+  # ---------------------------------------------------------------------------
+  # Native image mode: build the test/fixtures/native-app sbt-native-image app
+  # through bin/detect + bin/compile + bin/release and run the binary.
+  # ---------------------------------------------------------------------------
+  smoke-native:
+    name: Smoke (native image)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up JDK
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Smoke test native image mode
+        run: ./test/smoke-native.sh
